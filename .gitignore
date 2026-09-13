@@ -1,0 +1,20 @@
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.env
+*.pyc
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Never the live database -- this project points at Neptune's copy, never
+# duplicates it. If DB_PATH is ever pointed at a local file for some reason,
+# still never commit it.
+*.db
+*.db-shm
+*.db-wal
+
+.DS_Store
