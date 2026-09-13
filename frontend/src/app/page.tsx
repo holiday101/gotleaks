@@ -1,69 +1,103 @@
-import Image from "next/image";
+type LeaderboardRow = {
+  miu_id: string;
+  customer_name: string | null;
+  location: string | null;
+  account_number: string | null;
+  meter_number: string | null;
+  lot_zone_label: string | null;
+  total_consumption: number | null;
+  seven_day_avg: number | null;
+  reading_count: number | null;
+};
 
-export default function Home() {
+type LeaderboardResponse = {
+  window: { window_start: string; window_end: string } | null;
+  rows: LeaderboardRow[];
+};
+
+async function getLeaderboard(): Promise<LeaderboardResponse> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const res = await fetch(`${apiUrl}/api/usage/leaderboard`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`API returned ${res.status}`);
+  }
+  return res.json();
+}
+
+function formatNumber(value: number | null): string {
+  if (value === null || value === undefined) return "";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
+export default async function Home() {
+  let data: LeaderboardResponse | null = null;
+  let error: string | null = null;
+
+  try {
+    data = await getLeaderboard();
+  } catch (e) {
+    error = e instanceof Error ? e.message : "Failed to reach the API";
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="mx-auto max-w-5xl px-4 py-8">
+      <h1 className="text-2xl font-semibold mb-1">Water Usage Leaderboard</h1>
+      <p className="text-sm text-gray-500 mb-6">
+        First end-to-end slice of the GotLeaks rebuild -- this page is rendered by
+        Next.js, fetching live data from the FastAPI backend, which reads the same
+        database the Streamlit app uses.
+      </p>
+
+      {error && (
+        <div className="rounded border border-red-300 bg-red-50 text-red-800 p-4">
+          Could not reach the API at {process.env.NEXT_PUBLIC_API_URL}: {error}
+          <br />
+          Make sure the backend is running (
+          <code>cd backend && .venv/bin/python -m uvicorn main:app --reload --port 8000</code>
+          ).
+        </div>
+      )}
+
+      {data && data.window === null && (
+        <div className="rounded border border-yellow-300 bg-yellow-50 text-yellow-800 p-4">
+          No leak-status data computed yet -- run a sync in the Neptune app first.
+        </div>
+      )}
+
+      {data && data.window && (
+        <>
+          <p className="text-sm text-gray-500 mb-4">
+            Window: {data.window.window_start} &rarr; {data.window.window_end} &middot;{" "}
+            {data.rows.length} meters
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-left border-b border-gray-300">
+                  <th className="py-2 pr-4">#</th>
+                  <th className="py-2 pr-4">Customer</th>
+                  <th className="py-2 pr-4">Address</th>
+                  <th className="py-2 pr-4">Lot zone</th>
+                  <th className="py-2 pr-4 text-right">7-day total (gal)</th>
+                  <th className="py-2 pr-4 text-right">7-day avg (gal/day)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.slice(0, 50).map((row, i) => (
+                  <tr key={row.miu_id} className="border-b border-gray-100">
+                    <td className="py-1.5 pr-4 text-gray-400">{i + 1}</td>
+                    <td className="py-1.5 pr-4">{row.customer_name ?? "(no billing match)"}</td>
+                    <td className="py-1.5 pr-4">{row.location ?? ""}</td>
+                    <td className="py-1.5 pr-4">{row.lot_zone_label ?? ""}</td>
+                    <td className="py-1.5 pr-4 text-right">{formatNumber(row.total_consumption)}</td>
+                    <td className="py-1.5 pr-4 text-right">{formatNumber(row.seven_day_avg)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </main>
   );
 }
