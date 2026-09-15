@@ -1,27 +1,48 @@
+import Link from "next/link";
 import { getSession, hasRole, serverFetch, ApiError } from "@/lib/api";
 import Locked from "@/components/Locked";
 import UsageChart from "@/components/UsageChart";
+import DailyUsageChart from "@/components/DailyUsageChart";
 
 type UsagePoint = { reading_date: string; gallons_used: number | null };
+type DailyPoint = { day: string; gallons: number | null };
 type Neighbor = {
   miu_id: string;
   distance_ft: number;
   customer_name: string | null;
   address: string | null;
   lot_zone_label: string | null;
-  seven_day_avg: number | null;
+  window_avg: number | null;
 };
 type Neighbors = {
-  my_seven_day_avg: number | null;
+  days: number;
+  my_avg: number | null;
   neighborhood_avg: number | null;
   neighbors: Neighbor[];
 };
+
+// Mirrors USAGE_VIEWS in the Streamlit app -- "Last 7" stays the default so
+// a meter's page opens on a readable week of hourly data, not its whole
+// multi-year history in one illegible line.
+const VIEWS: { key: string; label: string; days: number | null }[] = [
+  { key: "7", label: "Last 7", days: 7 },
+  { key: "1", label: "Today", days: 1 },
+  { key: "30", label: "Month", days: 30 },
+  { key: "365", label: "Year", days: 365 },
+  { key: "all", label: "All", days: null },
+];
 
 function fmt(v: number | null) {
   return v === null || v === undefined ? "" : v.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
-export default async function MeterDetailPage({ params }: { params: Promise<{ miu_id: string }> }) {
+export default async function MeterDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ miu_id: string }>;
+  searchParams: Promise<{ view?: string; compare?: string }>;
+}) {
   const session = await getSession();
   if (!hasRole(session, "viewer")) {
     return (
@@ -32,11 +53,16 @@ export default async function MeterDetailPage({ params }: { params: Promise<{ mi
   }
 
   const { miu_id } = await params;
+  const sp = await searchParams;
+  const view = VIEWS.find((v) => v.key === sp.view) ?? VIEWS[0];
+  const compareWindow = sp.compare === "month" ? "month" : "week";
+  const compareDays = compareWindow === "month" ? 30 : 7;
 
   let usage: UsagePoint[] | null = null;
   let usageError: string | null = null;
   try {
-    usage = await serverFetch(`/api/meters/${encodeURIComponent(miu_id)}/usage`);
+    const qs = view.days === null ? "all=true" : `days=${view.days}`;
+    usage = await serverFetch(`/api/meters/${encodeURIComponent(miu_id)}/usage?${qs}`);
   } catch (e) {
     usageError = e instanceof ApiError ? e.message : "Failed to load usage";
   }
@@ -44,15 +70,22 @@ export default async function MeterDetailPage({ params }: { params: Promise<{ mi
   let neighbors: Neighbors | null = null;
   let neighborsError: string | null = null;
   try {
-    neighbors = await serverFetch(`/api/meters/${encodeURIComponent(miu_id)}/neighbors?n=10`);
+    neighbors = await serverFetch(
+      `/api/meters/${encodeURIComponent(miu_id)}/neighbors?n=10&days=${compareDays}`
+    );
   } catch (e) {
     neighborsError = e instanceof ApiError ? e.message : "Failed to load neighbors";
   }
 
-  const ratio =
-    neighbors?.my_seven_day_avg && neighbors?.neighborhood_avg
-      ? neighbors.my_seven_day_avg / neighbors.neighborhood_avg
-      : null;
+  let daily: DailyPoint[] | null = null;
+  let dailyError: string | null = null;
+  try {
+    daily = await serverFetch(`/api/meters/${encodeURIComponent(miu_id)}/daily-usage?days=${compareDays}`);
+  } catch (e) {
+    dailyError = e instanceof ApiError ? e.message : "Failed to load daily usage";
+  }
+
+  const ratio = neighbors?.my_avg && neighbors?.neighborhood_avg ? neighbors.my_avg / neighbors.neighborhood_avg : null;
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
@@ -60,7 +93,22 @@ export default async function MeterDetailPage({ params }: { params: Promise<{ mi
       <p className="text-sm text-gray-500 mb-6">Hourly usage and comparison to nearby meters.</p>
 
       <section className="mb-8">
-        <h2 className="text-lg font-medium mb-2">Usage history</h2>
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+          <h2 className="text-lg font-medium">Usage history</h2>
+          <div className="flex gap-2 text-sm">
+            {VIEWS.map((v) => (
+              <Link
+                key={v.key}
+                href={`/meters/${miu_id}?view=${v.key}${sp.compare ? `&compare=${sp.compare}` : ""}`}
+                className={`px-2 py-1 rounded border ${
+                  view.key === v.key ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-600"
+                }`}
+              >
+                {v.label}
+              </Link>
+            ))}
+          </div>
+        </div>
         {usageError && (
           <div className="rounded border border-red-300 bg-red-50 text-red-800 p-4 text-sm">{usageError}</div>
         )}
@@ -68,7 +116,22 @@ export default async function MeterDetailPage({ params }: { params: Promise<{ mi
       </section>
 
       <section>
-        <h2 className="text-lg font-medium mb-2">Compare to nearby meters</h2>
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+          <h2 className="text-lg font-medium">Compare to nearby meters</h2>
+          <div className="flex gap-2 text-sm">
+            {(["week", "month"] as const).map((w) => (
+              <Link
+                key={w}
+                href={`/meters/${miu_id}?view=${view.key}&compare=${w}`}
+                className={`px-2 py-1 rounded border ${
+                  compareWindow === w ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-600"
+                }`}
+              >
+                Last {w}
+              </Link>
+            ))}
+          </div>
+        </div>
         {neighborsError && (
           <div className="rounded border border-yellow-300 bg-yellow-50 text-yellow-800 p-4 text-sm">
             {neighborsError}
@@ -77,7 +140,7 @@ export default async function MeterDetailPage({ params }: { params: Promise<{ mi
         {neighbors && (
           <>
             <p className="text-sm mb-4">
-              This meter averaged <strong>{fmt(neighbors.my_seven_day_avg)} gal/day</strong> this week vs a{" "}
+              This meter averaged <strong>{fmt(neighbors.my_avg)} gal/day</strong> over the last {compareWindow} vs a{" "}
               <strong>{fmt(neighbors.neighborhood_avg)} gal/day</strong> average among its 10 nearest meters
               {ratio !== null && (
                 <>
@@ -86,7 +149,7 @@ export default async function MeterDetailPage({ params }: { params: Promise<{ mi
                 </>
               )}
             </p>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto mb-6">
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="text-left border-b border-gray-300">
@@ -94,7 +157,7 @@ export default async function MeterDetailPage({ params }: { params: Promise<{ mi
                     <th className="py-2 pr-4">Customer</th>
                     <th className="py-2 pr-4">Address</th>
                     <th className="py-2 pr-4">Lot zone</th>
-                    <th className="py-2 pr-4 text-right">7-day avg (gal/day)</th>
+                    <th className="py-2 pr-4 text-right">Avg (gal/day)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -104,13 +167,25 @@ export default async function MeterDetailPage({ params }: { params: Promise<{ mi
                       <td className="py-1.5 pr-4">{n.customer_name ?? ""}</td>
                       <td className="py-1.5 pr-4">{n.address ?? ""}</td>
                       <td className="py-1.5 pr-4 text-gray-500">{n.lot_zone_label ?? ""}</td>
-                      <td className="py-1.5 pr-4 text-right">{fmt(n.seven_day_avg)}</td>
+                      <td className="py-1.5 pr-4 text-right">{fmt(n.window_avg)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </>
+        )}
+
+        <h3 className="text-sm font-medium text-gray-700 mb-2">Daily usage -- this meter</h3>
+        {dailyError && (
+          <div className="rounded border border-yellow-300 bg-yellow-50 text-yellow-800 p-4 text-sm">{dailyError}</div>
+        )}
+        {daily && <DailyUsageChart data={daily} />}
+        {daily && (
+          <p className="text-xs text-gray-400 mt-2">
+            Each bar is that day&rsquo;s total gallons, over the last {compareWindow} shown above -- use it to see
+            which specific days drove the total, rather than just the average.
+          </p>
         )}
       </section>
     </main>

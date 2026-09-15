@@ -12,8 +12,8 @@ export default function UsageChart({ data }: { data: Point[] }) {
   }
 
   const width = 800;
-  const height = 220;
-  const padding = { top: 10, right: 10, bottom: 24, left: 44 };
+  const height = 260;
+  const padding = { top: 16, right: 16, bottom: 28, left: 52 };
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
 
@@ -27,32 +27,52 @@ export default function UsageChart({ data }: { data: Point[] }) {
 
   const path = clean.map((d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(d.gallons_used).toFixed(1)}`).join(" ");
 
-  const firstDate = new Date(clean[0].reading_date);
-  const lastDate = new Date(clean[n - 1].reading_date);
+  // 4 horizontal gridlines (min through max) so a value can be read
+  // without hovering -- there's no tooltip in this lightweight chart.
+  const yTickCount = 4;
+  const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => minV + ((maxV - minV) * i) / yTickCount);
+
+  // Up to 6 evenly spaced date labels along the x-axis, not just the
+  // endpoints -- with hundreds/thousands of hourly points, two labels
+  // give no sense of scale or where a spike happened.
+  const xTickCount = Math.min(6, n - 1);
+  const xTickIdx = Array.from({ length: xTickCount + 1 }, (_, i) => Math.round((i / xTickCount) * (n - 1)));
+  const uniqueXTickIdx = Array.from(new Set(xTickIdx));
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
-      <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#e5e7eb" />
+      {yTicks.map((v, i) => {
+        const yy = y(v);
+        return (
+          <g key={i}>
+            <line x1={padding.left} y1={yy} x2={width - padding.right} y2={yy} stroke="#f1f5f9" />
+            <text x={padding.left - 6} y={yy + 3} fontSize="10" fill="#9ca3af" textAnchor="end">
+              {v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </text>
+          </g>
+        );
+      })}
+      <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#cbd5e1" />
       <line
         x1={padding.left}
         y1={height - padding.bottom}
         x2={width - padding.right}
         y2={height - padding.bottom}
-        stroke="#e5e7eb"
+        stroke="#cbd5e1"
       />
-      <text x={4} y={padding.top + 4} fontSize="10" fill="#9ca3af">
-        {maxV.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-      </text>
-      <text x={4} y={height - padding.bottom} fontSize="10" fill="#9ca3af">
-        {minV.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-      </text>
       <path d={path} fill="none" stroke="#2563eb" strokeWidth={1.5} />
-      <text x={padding.left} y={height - 4} fontSize="10" fill="#9ca3af">
-        {firstDate.toLocaleDateString()}
-      </text>
-      <text x={width - padding.right} y={height - 4} fontSize="10" fill="#9ca3af" textAnchor="end">
-        {lastDate.toLocaleDateString()}
-      </text>
+      {uniqueXTickIdx.map((i) => {
+        const xx = x(i);
+        const d = new Date(clean[i].reading_date);
+        return (
+          <g key={i}>
+            <line x1={xx} y1={height - padding.bottom} x2={xx} y2={height - padding.bottom + 4} stroke="#cbd5e1" />
+            <text x={xx} y={height - 6} fontSize="10" fill="#9ca3af" textAnchor="middle">
+              {d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            </text>
+          </g>
+        );
+      })}
     </svg>
   );
 }

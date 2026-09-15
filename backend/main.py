@@ -148,10 +148,17 @@ def continuous_users(
 
 
 @app.get("/api/meters/{miu_id}/usage")
-def meter_usage(miu_id: str, since: str | None = None, until: str | None = None, user=Depends(auth.require_role("viewer"))):
+def meter_usage(
+    miu_id: str,
+    since: str | None = None,
+    until: str | None = None,
+    days: int | None = Query(default=7, ge=1, le=365),
+    all: bool = Query(default=False),
+    user=Depends(auth.require_role("viewer")),
+):
     conn = db.get_conn(readonly=True)
     try:
-        usage = queries.get_meter_usage(conn, miu_id, since=since, until=until)
+        usage = queries.get_meter_usage(conn, miu_id, since=since, until=until, days=None if all else days)
         if usage.empty:
             raise HTTPException(status_code=404, detail="No usage data for this meter/window")
         return _records(usage)
@@ -160,7 +167,12 @@ def meter_usage(miu_id: str, since: str | None = None, until: str | None = None,
 
 
 @app.get("/api/meters/{miu_id}/neighbors")
-def meter_neighbors(miu_id: str, n: int = Query(default=10, ge=1, le=100), user=Depends(auth.require_role("viewer"))):
+def meter_neighbors(
+    miu_id: str,
+    n: int = Query(default=10, ge=1, le=100),
+    days: int = Query(default=7, ge=1, le=365),
+    user=Depends(auth.require_role("viewer")),
+):
     import numpy as np
 
     conn = db.get_conn(readonly=True)
@@ -179,19 +191,30 @@ def meter_neighbors(miu_id: str, n: int = Query(default=10, ge=1, le=100), user=
         a = np.sin(dphi / 2) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda / 2) ** 2
         others["distance_ft"] = 2 * r_m * np.arcsin(np.sqrt(a)) * 3.28084
 
-        nearest = others.nsmallest(n, "distance_ft")
-        weekly = queries.get_usage_leaderboard(conn)[["miu_id", "total_consumption"]]
-        nearest = nearest.merge(weekly, on="miu_id", how="left")
-        nearest["seven_day_avg"] = nearest["total_consumption"] / 7.0
+        nearest = others.nsmallest(n, "distance_ft").copy()
+        totals = queries.get_window_totals_for_meters(conn, tuple(nearest["miu_id"]) + (miu_id,), days)
+        nearest = nearest.merge(totals, on="miu_id", how="left")
+        nearest["window_avg"] = nearest["total_consumption"] / days
 
-        my_weekly = weekly[weekly["miu_id"] == miu_id]["total_consumption"]
-        my_avg = my_weekly.iloc[0] / 7.0 if not my_weekly.empty else None
+        my_total = totals.loc[totals["miu_id"] == miu_id, "total_consumption"]
+        my_avg = my_total.iloc[0] / days if not my_total.empty and pd.notna(my_total.iloc[0]) else None
 
         return {
-            "my_seven_day_avg": _safe_float(my_avg),
-            "neighborhood_avg": _safe_float(nearest["seven_day_avg"].mean()) if not nearest.empty else None,
+            "days": days,
+            "my_avg": _safe_float(my_avg),
+            "neighborhood_avg": _safe_float(nearest["window_avg"].mean()) if not nearest.empty else None,
             "neighbors": _records(nearest.sort_values("distance_ft")),
         }
+    finally:
+        conn.close()
+
+
+@app.get("/api/meters/{miu_id}/daily-usage")
+def meter_daily_usage(miu_id: str, days: int = Query(default=7, ge=1, le=365), user=Depends(auth.require_role("viewer"))):
+    conn = db.get_conn(readonly=True)
+    try:
+        daily = queries.get_daily_usage(conn, miu_id, days)
+        return _records(daily)
     finally:
         conn.close()
 

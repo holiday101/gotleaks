@@ -109,9 +109,15 @@ def get_meter_coords(conn) -> pd.DataFrame:
     )
 
 
-def get_meter_usage(conn, miu_id: str, since: str | None = None, until: str | None = None) -> pd.DataFrame:
+def get_meter_usage(
+    conn, miu_id: str, since: str | None = None, until: str | None = None, days: int | None = None
+) -> pd.DataFrame:
     """Raw hourly usage for one meter, optionally windowed. Mirrors
-    _load_meter_usage in the Streamlit app."""
+    _load_meter_usage in the Streamlit app. `days`, like get_daily_usage and
+    get_window_totals_for_meters, anchors the window to this meter's own
+    last reading rather than "now" (sync can lag behind real time by a
+    day or more). `since`/`until` take precedence when both are given, for
+    callers that already have an explicit range."""
     if since and until:
         return pd.read_sql_query(
             "SELECT reading_date, consumption_with_multiplier AS gallons_used "
@@ -119,10 +125,70 @@ def get_meter_usage(conn, miu_id: str, since: str | None = None, until: str | No
             "ORDER BY reading_date",
             conn, params=(miu_id, since, until),
         )
+    if days is not None:
+        row = conn.execute(
+            "SELECT MAX(reading_date) AS m FROM water_usage WHERE miu_id = ?", (miu_id,)
+        ).fetchone()
+        if not row or not row[0]:
+            return pd.DataFrame(columns=["reading_date", "gallons_used"])
+        window_end = pd.Timestamp(row[0])
+        window_start = window_end - pd.Timedelta(days=days)
+        return pd.read_sql_query(
+            "SELECT reading_date, consumption_with_multiplier AS gallons_used "
+            "FROM water_usage WHERE miu_id = ? AND reading_date > ? AND reading_date <= ? "
+            "ORDER BY reading_date",
+            conn, params=(miu_id, window_start.isoformat(), row[0]),
+        )
     return pd.read_sql_query(
         "SELECT reading_date, consumption_with_multiplier AS gallons_used "
         "FROM water_usage WHERE miu_id = ? ORDER BY reading_date",
         conn, params=(miu_id,),
+    )
+
+
+def get_daily_usage(conn, miu_id: str, days: int) -> pd.DataFrame:
+    """Per-day usage totals for one meter's trailing `days` window, anchored
+    to that meter's own last reading (not "today") -- mirrors
+    _cached_daily_usage in the Streamlit app. Lets the nearby-meter
+    comparison's daily breakdown show which specific days drove the total,
+    rather than just the window's average."""
+    row = conn.execute(
+        "SELECT MAX(reading_date) AS m FROM water_usage WHERE miu_id = ?", (miu_id,)
+    ).fetchone()
+    if not row or not row[0]:
+        return pd.DataFrame(columns=["day", "gallons"])
+    window_end = pd.Timestamp(row[0])
+    window_start = window_end - pd.Timedelta(days=days)
+    return pd.read_sql_query(
+        "SELECT date(reading_date) AS day, SUM(consumption_with_multiplier) AS gallons "
+        "FROM water_usage WHERE miu_id = ? AND reading_date > ? AND reading_date <= ? "
+        "GROUP BY date(reading_date) ORDER BY day",
+        conn, params=(miu_id, window_start.isoformat(), row[0]),
+    )
+
+
+def get_window_totals_for_meters(conn, miu_ids: tuple[str, ...], days: int) -> pd.DataFrame:
+    """Live total consumption per meter over the trailing `days` window,
+    anchored to the latest reading among the given meters -- mirrors
+    _cached_window_totals_for_meters in the Streamlit app. Used for the
+    nearby-meter comparison's Last week/Last month toggle; the precomputed
+    meter_leak_status table only ever covers a fixed trailing week."""
+    if not miu_ids:
+        return pd.DataFrame(columns=["miu_id", "total_consumption"])
+    placeholders = ",".join("?" for _ in miu_ids)
+    row = conn.execute(
+        f"SELECT MAX(reading_date) AS m FROM water_usage WHERE miu_id IN ({placeholders})",
+        miu_ids,
+    ).fetchone()
+    if not row or not row[0]:
+        return pd.DataFrame(columns=["miu_id", "total_consumption"])
+    window_end = pd.Timestamp(row[0])
+    window_start = window_end - pd.Timedelta(days=days)
+    return pd.read_sql_query(
+        f"SELECT miu_id, SUM(consumption_with_multiplier) AS total_consumption "
+        f"FROM water_usage WHERE miu_id IN ({placeholders}) "
+        f"AND reading_date > ? AND reading_date <= ? GROUP BY miu_id",
+        conn, params=(*miu_ids, window_start.isoformat(), row[0]),
     )
 
 
