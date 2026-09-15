@@ -1,5 +1,14 @@
 # Production cutover -- GotLeaks replacing the Streamlit app
 
+**Status: completed 2026-09-15.** All five steps below were carried out (from
+a local session with working SSH access, unlike the cloud sandbox this doc
+was originally written for) and verified live at
+`https://membergolfonline.com/water/`. `neptune-water.service` is stopped and
+disabled; the sync timers were left running throughout. See
+`docs/gotleaks-ai/migration.md`'s "Cutover completed" section for the
+verification detail. Kept below as a reference for future re-deploys of this
+kind, not as an outstanding task list.
+
 This session (a cloud sandbox linked to your Mac) could build, test, and
 commit everything, but it cannot reach the EC2 server over SSH -- that
 network path is blocked from here regardless of credentials. Everything
