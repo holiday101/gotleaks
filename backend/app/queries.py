@@ -10,11 +10,32 @@ from __future__ import annotations
 import pandas as pd
 
 
-CUSTOMERS_WITH_ZONES_SQL = """
+def _hoa_predicate(name_col: str) -> str:
+    """SQL predicate matching HOA/community accounts by a standalone "HOA"
+    word -- not a substring, so it doesn't also catch surnames like "Hoang"
+    or "Ochoa". An HOA's own parcel record is one small lot, which
+    understates the many properties its master meter actually serves;
+    bucketing it there by that literal parcel size makes it look like a
+    tiny lot with an enormous leak instead of what it is: a large shared
+    account that belongs in the top zone regardless of its own lot size."""
+    col = f"UPPER({name_col})"
+    return (
+        f"({col} = 'HOA' OR {col} LIKE 'HOA %' OR {col} LIKE '% HOA' OR "
+        f"{col} LIKE '% HOA %' OR {col} LIKE '% HOA,%')"
+    )
+
+
+_TOP_LOT_ZONE_SQL = "(SELECT zone FROM lot_size_zones ORDER BY zone DESC LIMIT 1)"
+_TOP_LOT_ZONE_LABEL_SQL = "(SELECT label FROM lot_size_zones ORDER BY zone DESC LIMIT 1)"
+_IS_HOA_BILLING_NAME = _hoa_predicate("b.customer_name")
+
+CUSTOMERS_WITH_ZONES_SQL = f"""
     SELECT c.account_number, b.customer_name, b.location, b.primary_phone,
            b.secondary_phone, b.email_address, c.meter_number, c.miu_id,
            c.cycle_route, c.meter_type, c.meter_size, b.parcel_id,
-           ROUND(p.area_sqft) AS lot_size_sqft, lz.zone AS lot_zone, lz.label AS lot_zone_label,
+           ROUND(p.area_sqft) AS lot_size_sqft,
+           CASE WHEN {_IS_HOA_BILLING_NAME} THEN {_TOP_LOT_ZONE_SQL} ELSE lz.zone END AS lot_zone,
+           CASE WHEN {_IS_HOA_BILLING_NAME} THEN {_TOP_LOT_ZONE_LABEL_SQL} ELSE lz.label END AS lot_zone_label,
            ROUND(p.building_sqft) AS building_sqft, bz.zone AS bldg_zone, bz.label AS bldg_zone_label
     FROM customers c
     LEFT JOIN customer_billing b ON b.meter_id = c.miu_id
@@ -91,11 +112,13 @@ def get_continuous_users(conn, min_gph: float = 10.0, sort_by: str = "min_consum
 def get_meter_coords(conn) -> pd.DataFrame:
     """One row per meter with usage data AND a known lat/lon (from
     meter_parcels -- populated for 'geocoded'/'gis_survey' matches), for the
-    nearby-meter comparison."""
+    nearby-meter comparison. Same HOA lot-zone override as
+    CUSTOMERS_WITH_ZONES_SQL -- see _hoa_predicate."""
     return pd.read_sql_query(
-        """
+        f"""
         SELECT c.miu_id, mp.lat, mp.lon, b.customer_name, b.location AS address,
-               lz.zone AS lot_zone, lz.label AS lot_zone_label
+               CASE WHEN {_IS_HOA_BILLING_NAME} THEN {_TOP_LOT_ZONE_SQL} ELSE lz.zone END AS lot_zone,
+               CASE WHEN {_IS_HOA_BILLING_NAME} THEN {_TOP_LOT_ZONE_LABEL_SQL} ELSE lz.label END AS lot_zone_label
         FROM customers c
         JOIN meter_parcels mp ON mp.meter_id = c.miu_id AND mp.lat IS NOT NULL
         LEFT JOIN customer_billing b ON b.meter_id = c.miu_id
