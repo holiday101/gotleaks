@@ -1,0 +1,15 @@
+[Unit]
+Description=GotLeaks FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gotleaks/backend
+EnvironmentFile=/home/ubuntu/gotleaks/backend/.env
+ExecStart=/home/ubuntu/gotleaks/backend/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

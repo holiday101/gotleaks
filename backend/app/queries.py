@@ -124,3 +124,126 @@ def get_meter_usage(conn, miu_id: str, since: str | None = None, until: str | No
         "FROM water_usage WHERE miu_id = ? ORDER BY reading_date",
         conn, params=(miu_id,),
     )
+
+
+def get_customers(conn, q: str | None = None) -> pd.DataFrame:
+    """Same query the Water Usage leaderboard's join uses, but as its own
+    endpoint -- the Customers tab's full account/meter/contact/zone list."""
+    df = pd.read_sql_query(CUSTOMERS_WITH_ZONES_SQL, conn)
+    if q:
+        needle = q.lower()
+        mask = df.apply(lambda r: needle in str(r.values).lower(), axis=1)
+        df = df[mask]
+    return df
+
+
+def get_map_parcels(conn, threshold: float = 10.0) -> list[dict]:
+    """Parcels matched via billing address (meter_parcels), colored by
+    current leak status -- one dict per polygon RING (a MultiPolygon parcel
+    contributes multiple rings), same flattening the Streamlit pydeck map
+    used since the deck.gl runtime needs flat records, not nested geometry."""
+    import json
+
+    meter_parcels = pd.read_sql_query(
+        """
+        SELECT mp.meter_id, mp.parcel_id, mp.match_method, p.geometry,
+               c.meter_number, b.customer_name
+        FROM meter_parcels mp
+        JOIN parcels p ON p.parcel_id = mp.parcel_id
+        LEFT JOIN customers c ON c.miu_id = mp.meter_id
+        LEFT JOIN customer_billing b ON b.meter_id = mp.meter_id
+        """,
+        conn,
+    )
+    status = pd.read_sql_query(
+        "SELECT miu_id, min_consumption FROM meter_leak_status", conn
+    ).set_index("miu_id")["min_consumption"]
+
+    records = []
+    for _, row in meter_parcels.iterrows():
+        min_consumption = status.get(row["meter_id"])
+        min_consumption = float(min_consumption) if min_consumption is not None and min_consumption == min_consumption else None
+        is_leak = bool(min_consumption is not None and min_consumption >= threshold)
+        label = row["customer_name"] if pd.notna(row["customer_name"]) else "(no billing match)"
+        tooltip = f"{label} — meter {row['meter_number']}"
+        if is_leak:
+            tooltip += f" · continuous {min_consumption:.0f} gal/hr"
+        try:
+            geom = json.loads(row["geometry"])
+        except (TypeError, ValueError):
+            continue
+        if geom.get("type") == "Polygon":
+            rings = [geom["coordinates"][0]]
+        elif geom.get("type") == "MultiPolygon":
+            rings = [part[0] for part in geom["coordinates"]]
+        else:
+            continue
+        color = _leak_color(min_consumption if is_leak else None, threshold)
+        for ring in rings:
+            records.append({
+                "parcel_id": row["parcel_id"], "polygon": ring,
+                "fill_color": color, "tooltip": tooltip, "is_leak": is_leak,
+            })
+    return records
+
+
+def get_map_gis_meters(conn) -> list[dict]:
+    """Surveyed meter-location points (red dots on the map), plus each
+    point's matched parcel polygon -- for parcels the GIS survey matched
+    that meter_parcels/billing never did (drawn in neutral blue)."""
+    import json
+
+    gis_meters = pd.read_sql_query(
+        "SELECT meter_id, lat, lon, address, customer_name, parcel_id FROM gis_meters",
+        conn,
+    )
+    points = gis_meters.replace({float("nan"): None}).where(gis_meters.notna(), None).to_dict(orient="records")
+
+    already_drawn = {
+        r[0] for r in conn.execute("SELECT DISTINCT parcel_id FROM meter_parcels").fetchall()
+    }
+    extra_parcels = pd.read_sql_query(
+        """
+        SELECT DISTINCT p.parcel_id, p.geometry
+        FROM gis_meters g JOIN parcels p ON p.parcel_id = g.parcel_id
+        WHERE g.parcel_id IS NOT NULL
+        """,
+        conn,
+    )
+    extra_records = []
+    for _, row in extra_parcels.iterrows():
+        if row["parcel_id"] in already_drawn:
+            continue
+        try:
+            geom = json.loads(row["geometry"])
+        except (TypeError, ValueError):
+            continue
+        if geom.get("type") == "Polygon":
+            rings = [geom["coordinates"][0]]
+        elif geom.get("type") == "MultiPolygon":
+            rings = [part[0] for part in geom["coordinates"]]
+        else:
+            continue
+        for ring in rings:
+            extra_records.append({
+                "parcel_id": row["parcel_id"], "polygon": ring,
+                "fill_color": [70, 130, 220, 40],
+                "tooltip": f"Parcel {row['parcel_id']} (GIS survey only, no billing match)",
+                "is_leak": False,
+            })
+
+    return {"points": points, "extra_parcels": extra_records}
+
+
+def _leak_color(min_consumption, threshold: float) -> list[int]:
+    """Log-scaled yellow -> red for a leak's severity, blue for none --
+    ported from the Streamlit app's _leak_color()."""
+    import math
+
+    if min_consumption is None or min_consumption != min_consumption or min_consumption < threshold:
+        return [70, 130, 220, 90]
+    t = min(1.0, math.log(min_consumption / threshold + 1) / math.log(20))
+    r = 255
+    g = int(220 * (1 - t))
+    b = int(40 * (1 - t))
+    return [int(r), int(g), int(b), 180]

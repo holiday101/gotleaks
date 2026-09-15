@@ -1,0 +1,15 @@
+[Unit]
+Description=GotLeaks Next.js frontend
+After=network.target gotleaks-backend.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gotleaks/frontend
+EnvironmentFile=/home/ubuntu/gotleaks/frontend/.env.production
+ExecStart=/usr/bin/npm start -- --port 3000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
