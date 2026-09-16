@@ -39,6 +39,16 @@ export default function UsageChart({ data }: { data: Point[] }) {
   const xTickIdx = Array.from({ length: xTickCount + 1 }, (_, i) => Math.round((i / xTickCount) * (n - 1)));
   const uniqueXTickIdx = Array.from(new Set(xTickIdx));
 
+  // A single-day window (e.g. the "Today" view) puts every point on the same
+  // calendar date, so a date label repeated across all ticks tells you
+  // nothing -- show hour-of-day instead, which is what actually varies.
+  const spanMs = new Date(clean[n - 1].reading_date).getTime() - new Date(clean[0].reading_date).getTime();
+  const isSingleDay = spanMs < 36 * 60 * 60 * 1000;
+  const formatTick = (d: Date) =>
+    isSingleDay
+      ? d.toLocaleTimeString(undefined, { hour: "numeric" })
+      : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
       {yTicks.map((v, i) => {
@@ -68,7 +78,7 @@ export default function UsageChart({ data }: { data: Point[] }) {
           <g key={i}>
             <line x1={xx} y1={height - padding.bottom} x2={xx} y2={height - padding.bottom + 4} stroke="#cbd5e1" />
             <text x={xx} y={height - 6} fontSize="10" fill="#9ca3af" textAnchor="middle">
-              {d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+              {formatTick(d)}
             </text>
           </g>
         );

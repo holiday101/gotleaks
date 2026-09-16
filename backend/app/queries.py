@@ -169,6 +169,16 @@ def get_meter_usage(
     )
 
 
+def get_meter_info(conn, miu_id: str) -> pd.DataFrame:
+    """Customer/account info for one meter -- same join as
+    CUSTOMERS_WITH_ZONES_SQL, filtered to a single miu_id, for the meter
+    detail page header (customer name + address, not just the raw ID)."""
+    return pd.read_sql_query(
+        f"SELECT * FROM ({CUSTOMERS_WITH_ZONES_SQL}) WHERE miu_id = ?",
+        conn, params=(miu_id,),
+    )
+
+
 def get_daily_usage(conn, miu_id: str, days: int) -> pd.DataFrame:
     """Per-day usage totals for one meter's trailing `days` window, anchored
     to that meter's own last reading (not "today") -- mirrors

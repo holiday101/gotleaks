@@ -6,6 +6,12 @@ import DailyUsageChart from "@/components/DailyUsageChart";
 
 type UsagePoint = { reading_date: string; gallons_used: number | null };
 type DailyPoint = { day: string; gallons: number | null };
+type MeterInfo = {
+  customer_name: string | null;
+  location: string | null;
+  account_number: string | null;
+  meter_number: string | null;
+};
 type Neighbor = {
   miu_id: string;
   distance_ft: number;
@@ -58,6 +64,13 @@ export default async function MeterDetailPage({
   const compareWindow = sp.compare === "month" ? "month" : "week";
   const compareDays = compareWindow === "month" ? 30 : 7;
 
+  let info: MeterInfo | null = null;
+  try {
+    info = await serverFetch(`/api/meters/${encodeURIComponent(miu_id)}/info`);
+  } catch {
+    // Header falls back to just the meter ID if there's no billing match.
+  }
+
   let usage: UsagePoint[] | null = null;
   let usageError: string | null = null;
   try {
@@ -89,8 +102,13 @@ export default async function MeterDetailPage({
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-1">Meter {miu_id}</h1>
-      <p className="text-sm text-gray-500 mb-6">Hourly usage and comparison to nearby meters.</p>
+      <h1 className="text-2xl font-semibold mb-1">
+        {info?.customer_name ? info.customer_name : `Meter ${miu_id}`}
+      </h1>
+      <p className="text-sm text-gray-500 mb-6">
+        {info?.customer_name && <>Meter {miu_id}{info.location ? ` -- ${info.location}` : ""} -- </>}
+        Hourly usage and comparison to nearby meters.
+      </p>
 
       <section className="mb-8">
         <div className="flex items-center justify-between flex-wrap gap-2 mb-2">

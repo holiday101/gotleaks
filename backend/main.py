@@ -147,6 +147,18 @@ def continuous_users(
         conn.close()
 
 
+@app.get("/api/meters/{miu_id}/info")
+def meter_info(miu_id: str, user=Depends(auth.require_role("viewer"))):
+    conn = db.get_conn(readonly=True)
+    try:
+        info = queries.get_meter_info(conn, miu_id)
+        if info.empty:
+            raise HTTPException(status_code=404, detail="No such meter")
+        return _records(info)[0]
+    finally:
+        conn.close()
+
+
 @app.get("/api/meters/{miu_id}/usage")
 def meter_usage(
     miu_id: str,
