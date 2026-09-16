@@ -7,6 +7,7 @@ const LINKS: { href: string; label: string; minRole: "viewer" | "admin" | "globa
   { href: "/", label: "Water Usage", minRole: "viewer" },
   { href: "/continuous-users", label: "Continuous Users", minRole: "viewer" },
   { href: "/map", label: "Map", minRole: "viewer" },
+  { href: "/notifications", label: "Notify Residents", minRole: "admin" },
   { href: "/users", label: "Manage Users", minRole: "admin" },
   { href: "/sync", label: "Sync & Backfill", minRole: "global" },
   { href: "/ask", label: "Ask AI", minRole: "global" },

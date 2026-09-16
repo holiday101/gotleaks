@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getSession, hasRole, serverFetch, ApiError } from "@/lib/api";
 import Locked from "@/components/Locked";
+import ContinuousUsersTable from "./ContinuousUsersTable";
 
 type Row = {
   miu_id: string;
@@ -20,10 +21,6 @@ type Response = {
   window: { window_start: string; window_end: string } | null;
   rows: Row[];
 };
-
-function fmt(v: number | null) {
-  return v === null || v === undefined ? "" : v.toLocaleString(undefined, { maximumFractionDigits: 1 });
-}
 
 export default async function ContinuousUsersPage({
   searchParams,
@@ -103,44 +100,7 @@ export default async function ContinuousUsersPage({
       {data && data.window && (
         <>
           <p className="text-sm text-gray-500 mb-4">{data.rows.length} qualifying meters</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="text-left border-b border-gray-300">
-                  <th className="py-2 pr-4">#</th>
-                  <th className="py-2 pr-4">Customer</th>
-                  <th className="py-2 pr-4">Address</th>
-                  <th className="py-2 pr-4">Phone</th>
-                  <th className="py-2 pr-4">Email</th>
-                  <th className="py-2 pr-4 text-right">Raw floor (gal/hr)</th>
-                  <th className="py-2 pr-4 text-right">3-hr rolling floor</th>
-                  <th className="py-2 pr-4 text-right">7-day total (gal)</th>
-                  <th className="py-2 pr-4">Continuous since</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.rows.map((row, i) => (
-                  <tr key={row.miu_id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-1.5 pr-4 text-gray-400">{i + 1}</td>
-                    <td className="py-1.5 pr-4">
-                      <Link href={`/meters/${row.miu_id}`} className="text-blue-700 hover:underline">
-                        {row.customer_name ?? "(no billing match)"}
-                      </Link>
-                    </td>
-                    <td className="py-1.5 pr-4">{row.address ?? ""}</td>
-                    <td className="py-1.5 pr-4">{row.primary_phone ?? row.secondary_phone ?? ""}</td>
-                    <td className="py-1.5 pr-4">{row.email_address ?? ""}</td>
-                    <td className="py-1.5 pr-4 text-right">{fmt(row.min_consumption)}</td>
-                    <td className="py-1.5 pr-4 text-right font-medium">{fmt(row.roll3_min_consumption)}</td>
-                    <td className="py-1.5 pr-4 text-right">{fmt(row.total_consumption)}</td>
-                    <td className="py-1.5 pr-4 text-gray-500">
-                      {row.streak_start ? new Date(row.streak_start).toLocaleDateString() : ""}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ContinuousUsersTable rows={data.rows} canSend={hasRole(session, "admin")} />
         </>
       )}
     </main>

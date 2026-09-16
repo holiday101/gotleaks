@@ -8,6 +8,8 @@ migrates data.
 """
 from __future__ import annotations
 
+import io
+import json
 import os
 import re
 from contextlib import asynccontextmanager
@@ -16,14 +18,18 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before importing app.neptune_db, which reads DB_PATH at import time
 
+import mammoth
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import auth
+from app import email_render
+from app import email_sender
 from app import neptune_client as nc
 from app import neptune_db as db
 from app import neptune_sync as sync
+from app import notifications_db as ndb
 from app import queries
 
 
@@ -306,6 +312,164 @@ def set_user_active(user_id: int, payload: dict, user=Depends(auth.require_role(
             raise HTTPException(status_code=400, detail="Can't deactivate the last global account.")
         db.set_user_active(conn, user_id, active)
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+# ----------------------------------------------------------- notifications --
+
+@app.get("/api/notifications/merge-fields")
+def notification_merge_fields(user=Depends(auth.require_role("admin"))):
+    return {"fields": [{"tag": tag, "label": label} for tag, label in email_render.MERGE_FIELDS]}
+
+
+@app.get("/api/notifications/template")
+def get_notification_template(user=Depends(auth.require_role("admin"))):
+    conn = ndb.get_conn()
+    try:
+        return ndb.get_template(conn)
+    finally:
+        conn.close()
+
+
+@app.put("/api/notifications/template")
+def save_notification_template(payload: dict, user=Depends(auth.require_role("admin"))):
+    subject = (payload.get("subject") or "").strip()
+    body_html = payload.get("body_html") or ""
+    if not subject:
+        raise HTTPException(status_code=400, detail="Subject can't be empty.")
+    if not body_html.strip():
+        raise HTTPException(status_code=400, detail="Body can't be empty.")
+    conn = ndb.get_conn()
+    try:
+        return ndb.save_template(conn, subject, body_html, updated_by=user["email"])
+    finally:
+        conn.close()
+
+
+@app.post("/api/notifications/template/upload")
+async def upload_notification_template(file: UploadFile, user=Depends(auth.require_role("admin"))):
+    if not file.filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Upload a .docx file.")
+    raw = await file.read()
+    try:
+        result = mammoth.convert_to_html(io.BytesIO(raw))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Couldn't read that .docx: {e}")
+    body_html, leftover_placeholders = email_render.translate_uploaded_placeholders(result.value)
+    warnings = [str(w) for w in result.messages]
+    if leftover_placeholders:
+        warnings.append(
+            "Left as literal text (no matching merge field, check and fix by hand): "
+            + ", ".join(leftover_placeholders)
+        )
+    return {"body_html": body_html, "warnings": warnings}
+
+
+def _continuous_user_rows_by_miu(conn, miu_ids: list[str]) -> pd.DataFrame:
+    rows = queries.get_continuous_users(conn, min_gph=0.0)
+    if rows.empty:
+        return rows
+    return rows[rows["miu_id"].isin(miu_ids)]
+
+
+@app.post("/api/notifications/preview")
+def preview_notification(payload: dict, user=Depends(auth.require_role("admin"))):
+    miu_id = payload.get("miu_id")
+    if not miu_id:
+        raise HTTPException(status_code=400, detail="miu_id is required.")
+
+    conn = db.get_conn(readonly=True)
+    try:
+        matches = _continuous_user_rows_by_miu(conn, [miu_id])
+        if matches.empty:
+            raise HTTPException(status_code=404, detail="That meter isn't on the current continuous-users list.")
+        row = _records(matches)[0]
+    finally:
+        conn.close()
+
+    ntf_conn = ndb.get_conn()
+    try:
+        template = ndb.get_template(ntf_conn)
+    finally:
+        ntf_conn.close()
+
+    sender_name = os.environ.get("EMAIL_SENDER_DISPLAY_NAME", "Providence City Utility Billing")
+    values = email_render.build_merge_values(row, sender_name)
+    return {
+        "subject": email_render.render(template["subject"], values),
+        "html": email_render.render(template["body_html"], values),
+        "recipient_email": row.get("email_address"),
+    }
+
+
+@app.post("/api/notifications/send")
+def send_notifications(payload: dict, user=Depends(auth.require_role("admin"))):
+    miu_ids = payload.get("miu_ids") or []
+    if not isinstance(miu_ids, list) or not miu_ids:
+        raise HTTPException(status_code=400, detail="miu_ids must be a non-empty list.")
+
+    conn = db.get_conn(readonly=True)
+    try:
+        matches = _continuous_user_rows_by_miu(conn, miu_ids)
+        rows = _records(matches)
+    finally:
+        conn.close()
+
+    ntf_conn = ndb.get_conn()
+    try:
+        template = ndb.get_template(ntf_conn)
+    finally:
+        ntf_conn.close()
+
+    sender_name = os.environ.get("EMAIL_SENDER_DISPLAY_NAME", "Providence City Utility Billing")
+    found_ids = {r["miu_id"] for r in rows}
+    sent, skipped, failed = [], [], []
+
+    for miu_id in miu_ids:
+        if miu_id not in found_ids:
+            skipped.append({"miu_id": miu_id, "reason": "Not on the current continuous-users list"})
+            continue
+        row = next(r for r in rows if r["miu_id"] == miu_id)
+        email = row.get("email_address")
+        if not email:
+            skipped.append({"miu_id": miu_id, "reason": "No email address on file"})
+            continue
+
+        values = email_render.build_merge_values(row, sender_name)
+        subject = email_render.render(template["subject"], values)
+        html = email_render.render(template["body_html"], values)
+
+        log_conn = ndb.get_conn()
+        try:
+            try:
+                provider_id = email_sender.send_email(email, subject, html)
+                ndb.log_notification(
+                    log_conn, miu_id=miu_id, recipient_email=email, template_name=template["name"],
+                    subject=subject, merge_data_json=json.dumps(values), status="sent",
+                    error=None, provider_id=provider_id, sent_by=user["email"],
+                )
+                sent.append({"miu_id": miu_id, "email": email})
+            except email_sender.EmailNotConfigured as e:
+                raise HTTPException(status_code=500, detail=str(e))
+            except Exception as e:
+                ndb.log_notification(
+                    log_conn, miu_id=miu_id, recipient_email=email, template_name=template["name"],
+                    subject=subject, merge_data_json=json.dumps(values), status="failed",
+                    error=str(e), provider_id=None, sent_by=user["email"],
+                )
+                failed.append({"miu_id": miu_id, "email": email, "error": str(e)})
+        finally:
+            log_conn.close()
+
+    return {"sent": sent, "skipped": skipped, "failed": failed}
+
+
+@app.get("/api/notifications/log")
+def notification_log(limit: int = Query(default=100, ge=1, le=500), user=Depends(auth.require_role("admin"))):
+    conn = ndb.get_conn()
+    try:
+        return {"rows": ndb.list_recent_notifications(conn, limit=limit)}
     finally:
         conn.close()
 
