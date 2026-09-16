@@ -23,6 +23,11 @@ type GisMeter = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+function openMeter(meterId: string) {
+  window.open(`${BASE_PATH}/meters/${meterId}`, "_blank", "noopener,noreferrer");
+}
 
 const INITIAL_VIEW_STATE = {
   latitude: 41.7,
@@ -101,7 +106,7 @@ export default function MapClient() {
         autoHighlight: true,
         onClick: (info) => {
           const meterId = info.object?.meter_id;
-          if (meterId) window.open(`/meters/${meterId}`, "_blank", "noopener,noreferrer");
+          if (meterId) openMeter(meterId);
         },
       }),
       new ScatterplotLayer<GisMeter>({
@@ -116,7 +121,7 @@ export default function MapClient() {
         autoHighlight: true,
         onClick: (info) => {
           const meterId = info.object?.meter_id;
-          if (meterId) window.open(`/meters/${meterId}`, "_blank", "noopener,noreferrer");
+          if (meterId) openMeter(meterId);
         },
       }),
     ];

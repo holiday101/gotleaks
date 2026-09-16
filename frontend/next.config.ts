@@ -10,6 +10,12 @@ const basePath = process.env.NEXT_BASE_PATH || undefined;
 
 const nextConfig: NextConfig = {
   basePath,
+  // next/link and the router prepend basePath automatically, but a raw
+  // window.open(path) does not -- expose it so client code building URLs
+  // by hand (e.g. the map's new-window meter links) can prefix it themselves.
+  env: {
+    NEXT_PUBLIC_BASE_PATH: basePath ?? "",
+  },
 };
 
 export default nextConfig;
