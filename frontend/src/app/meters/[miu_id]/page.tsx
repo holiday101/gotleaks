@@ -267,15 +267,24 @@ export default async function MeterDetailPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {neighbors.neighbors.map((n) => (
-                    <tr key={n.miu_id} className="border-b border-gray-100">
-                      <td className="py-1.5 pr-4">{n.distance_ft.toFixed(0)}</td>
-                      <td className="py-1.5 pr-4">{n.customer_name ?? ""}</td>
-                      <td className="py-1.5 pr-4">{n.address ?? ""}</td>
-                      <td className="py-1.5 pr-4 text-gray-500">{n.lot_zone_label ?? ""}</td>
-                      <td className="py-1.5 pr-4 text-right">{fmt(n.window_avg)}</td>
-                    </tr>
-                  ))}
+                  {neighbors.neighbors.map((n) => {
+                    const isMe = n.miu_id === miu_id;
+                    return (
+                      <tr
+                        key={n.miu_id}
+                        className={`border-b border-gray-100 ${isMe ? "bg-blue-50 font-semibold" : ""}`}
+                      >
+                        <td className="py-1.5 pr-4">{n.distance_ft.toFixed(0)}</td>
+                        <td className="py-1.5 pr-4">
+                          {n.customer_name ?? ""}
+                          {isMe && <span className="text-blue-600"> (this meter)</span>}
+                        </td>
+                        <td className="py-1.5 pr-4">{n.address ?? ""}</td>
+                        <td className="py-1.5 pr-4 text-gray-500">{n.lot_zone_label ?? ""}</td>
+                        <td className="py-1.5 pr-4 text-right">{fmt(n.window_avg)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

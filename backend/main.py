@@ -235,7 +235,22 @@ def meter_neighbors(
         nearest["window_avg"] = nearest["total_consumption"] / days
 
         my_total = totals.loc[totals["miu_id"] == miu_id, "total_consumption"]
-        my_avg = my_total.iloc[0] / days if not my_total.empty and pd.notna(my_total.iloc[0]) else None
+        my_total_val = my_total.iloc[0] if not my_total.empty else None
+        my_avg = my_total_val / days if my_total_val is not None and pd.notna(my_total_val) else None
+
+        # The meter being viewed belongs in its own "nearest neighbors"
+        # table -- at distance 0 -- so it's ranked in place among the
+        # zone-mates it's being compared to, not just summarized above it.
+        me_row = pd.DataFrame([{
+            "miu_id": miu_id,
+            "customer_name": me["customer_name"],
+            "address": me["address"],
+            "lot_zone_label": me["lot_zone_label"],
+            "distance_ft": 0.0,
+            "total_consumption": my_total_val,
+            "window_avg": my_avg,
+        }])
+        combined = pd.concat([nearest, me_row], ignore_index=True)
 
         return {
             "days": days,
@@ -244,7 +259,7 @@ def meter_neighbors(
             "neighborhood_avg": _safe_float(nearest["window_avg"].mean()) if not nearest.empty else None,
             # Most to least usage -- the point of this table is "how do I
             # compare", so the heaviest zone-mates belong at the top.
-            "neighbors": _records(nearest.sort_values("window_avg", ascending=False, na_position="last")),
+            "neighbors": _records(combined.sort_values("window_avg", ascending=False, na_position="last")),
         }
     finally:
         conn.close()
