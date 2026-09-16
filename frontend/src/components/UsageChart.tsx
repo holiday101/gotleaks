@@ -2,7 +2,7 @@
 
 type Point = { reading_date: string; gallons_used: number | null };
 
-// Lightweight inline-SVG line chart -- no charting library dependency.
+// Lightweight inline-SVG bar chart -- no charting library dependency.
 // Deliberately simple: this is an hourly usage trace, not a general-purpose
 // chart component, so it only needs to do one thing well.
 export default function UsageChart({ data }: { data: Point[] }) {
@@ -17,20 +17,18 @@ export default function UsageChart({ data }: { data: Point[] }) {
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
 
-  const values = clean.map((d) => d.gallons_used);
-  const maxV = Math.max(...values, 1);
-  const minV = Math.min(...values, 0);
   const n = clean.length;
+  const maxV = Math.max(...clean.map((d) => d.gallons_used), 1);
 
-  const x = (i: number) => padding.left + (i / (n - 1)) * innerW;
-  const y = (v: number) => padding.top + innerH - ((v - minV) / (maxV - minV || 1)) * innerH;
+  const gap = n > 60 ? 0 : 2;
+  const barW = Math.max(1, innerW / n - gap);
+  const barX = (i: number) => padding.left + i * (innerW / n) + gap / 2;
+  const y = (v: number) => padding.top + innerH - (v / maxV) * innerH;
 
-  const path = clean.map((d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(d.gallons_used).toFixed(1)}`).join(" ");
-
-  // 4 horizontal gridlines (min through max) so a value can be read
-  // without hovering -- there's no tooltip in this lightweight chart.
+  // 4 horizontal gridlines (0 through max) so a value can be read without
+  // hovering -- there's no tooltip in this lightweight chart.
   const yTickCount = 4;
-  const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => minV + ((maxV - minV) * i) / yTickCount);
+  const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => (maxV * i) / yTickCount);
 
   // Up to 6 evenly spaced date labels along the x-axis, not just the
   // endpoints -- with hundreds/thousands of hourly points, two labels
@@ -70,9 +68,13 @@ export default function UsageChart({ data }: { data: Point[] }) {
         y2={height - padding.bottom}
         stroke="#cbd5e1"
       />
-      <path d={path} fill="none" stroke="#2563eb" strokeWidth={1.5} />
+      {clean.map((d, i) => {
+        const bx = barX(i);
+        const by = y(d.gallons_used);
+        return <rect key={i} x={bx} y={by} width={barW} height={height - padding.bottom - by} fill="#2563eb" />;
+      })}
       {uniqueXTickIdx.map((i) => {
-        const xx = x(i);
+        const xx = barX(i) + barW / 2;
         const d = new Date(clean[i].reading_date);
         return (
           <g key={i}>

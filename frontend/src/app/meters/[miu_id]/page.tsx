@@ -27,12 +27,11 @@ type Neighbors = {
   neighbors: Neighbor[];
 };
 
-// Mirrors USAGE_VIEWS in the Streamlit app -- "Last 7" stays the default so
-// a meter's page opens on a readable week of hourly data, not its whole
-// multi-year history in one illegible line.
+// "Today" is the default -- a meter's page opens on its most recent day of
+// hourly readings, not a week-plus of data crammed into one chart.
 const VIEWS: { key: string; label: string; days: number | null }[] = [
-  { key: "7", label: "Last 7", days: 7 },
   { key: "1", label: "Today", days: 1 },
+  { key: "7", label: "Last 7", days: 7 },
   { key: "30", label: "Month", days: 30 },
   { key: "365", label: "Year", days: 365 },
   { key: "all", label: "All", days: null },
