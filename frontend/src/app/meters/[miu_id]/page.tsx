@@ -2,10 +2,8 @@ import Link from "next/link";
 import { getSession, hasRole, serverFetch, ApiError } from "@/lib/api";
 import Locked from "@/components/Locked";
 import UsageChart from "@/components/UsageChart";
-import DailyUsageChart from "@/components/DailyUsageChart";
 
 type UsagePoint = { reading_date: string; gallons_used: number | null };
-type DailyPoint = { day: string; gallons: number | null };
 type MeterInfo = {
   customer_name: string | null;
   location: string | null;
@@ -87,14 +85,6 @@ export default async function MeterDetailPage({
     );
   } catch (e) {
     neighborsError = e instanceof ApiError ? e.message : "Failed to load neighbors";
-  }
-
-  let daily: DailyPoint[] | null = null;
-  let dailyError: string | null = null;
-  try {
-    daily = await serverFetch(`/api/meters/${encodeURIComponent(miu_id)}/daily-usage?days=${compareDays}`);
-  } catch (e) {
-    dailyError = e instanceof ApiError ? e.message : "Failed to load daily usage";
   }
 
   const ratio = neighbors?.my_avg && neighbors?.neighborhood_avg ? neighbors.my_avg / neighbors.neighborhood_avg : null;
@@ -191,18 +181,6 @@ export default async function MeterDetailPage({
               </table>
             </div>
           </>
-        )}
-
-        <h3 className="text-sm font-medium text-gray-700 mb-2">Daily usage -- this meter</h3>
-        {dailyError && (
-          <div className="rounded border border-yellow-300 bg-yellow-50 text-yellow-800 p-4 text-sm">{dailyError}</div>
-        )}
-        {daily && <DailyUsageChart data={daily} />}
-        {daily && (
-          <p className="text-xs text-gray-400 mt-2">
-            Each bar is that day&rsquo;s total gallons, over the last {compareWindow} shown above -- use it to see
-            which specific days drove the total, rather than just the average.
-          </p>
         )}
       </section>
     </main>

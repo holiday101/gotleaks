@@ -1,11 +1,16 @@
 "use client";
 
+import { useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
+
 type Point = { reading_date: string; gallons_used: number | null };
 
 // Lightweight inline-SVG bar chart -- no charting library dependency.
 // Deliberately simple: this is an hourly usage trace, not a general-purpose
 // chart component, so it only needs to do one thing well.
 export default function UsageChart({ data }: { data: Point[] }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
   const clean = data.filter((d) => d.gallons_used !== null) as { reading_date: string; gallons_used: number }[];
   if (clean.length < 2) {
     return <p className="text-sm text-gray-400">Not enough data to chart.</p>;
@@ -26,7 +31,7 @@ export default function UsageChart({ data }: { data: Point[] }) {
   const y = (v: number) => padding.top + innerH - (v / maxV) * innerH;
 
   // 4 horizontal gridlines (0 through max) so a value can be read without
-  // hovering -- there's no tooltip in this lightweight chart.
+  // hovering -- the tooltip only shows one value at a time.
   const yTickCount = 4;
   const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => (maxV * i) / yTickCount);
 
@@ -46,9 +51,38 @@ export default function UsageChart({ data }: { data: Point[] }) {
     isSingleDay
       ? d.toLocaleTimeString(undefined, { hour: "numeric" })
       : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const formatTooltipDate = (d: Date) =>
+    isSingleDay
+      ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+      : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric" });
+
+  // Maps a pointer's screen position to the bar under it -- the SVG is
+  // scaled by the browser (viewBox 800-wide, rendered at whatever the
+  // container measures), so screen pixels have to be converted back into
+  // chart coordinates before they line up with a bar index.
+  const indexAtClientX = (svg: SVGSVGElement, clientX: number) => {
+    const rect = svg.getBoundingClientRect();
+    const localX = ((clientX - rect.left) / rect.width) * width;
+    const idx = Math.floor((localX - padding.left) / (innerW / n));
+    return Math.min(n - 1, Math.max(0, idx));
+  };
+  const handlePointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+    setHoverIdx(indexAtClientX(e.currentTarget, e.clientX));
+  };
+
+  const hovered = hoverIdx !== null ? clean[hoverIdx] : null;
+  const tooltipCx = hoverIdx !== null ? barX(hoverIdx) + barW / 2 : 0;
+  const tooltipW = 112;
+  const tooltipX = Math.min(Math.max(tooltipCx - tooltipW / 2, padding.left), width - padding.right - tooltipW);
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="w-full h-auto touch-none"
+      onPointerMove={handlePointerMove}
+      onPointerDown={handlePointerMove}
+      onPointerLeave={() => setHoverIdx(null)}
+    >
       {yTicks.map((v, i) => {
         const yy = y(v);
         return (
@@ -71,7 +105,16 @@ export default function UsageChart({ data }: { data: Point[] }) {
       {clean.map((d, i) => {
         const bx = barX(i);
         const by = y(d.gallons_used);
-        return <rect key={i} x={bx} y={by} width={barW} height={height - padding.bottom - by} fill="#2563eb" />;
+        return (
+          <rect
+            key={i}
+            x={bx}
+            y={by}
+            width={barW}
+            height={height - padding.bottom - by}
+            fill={i === hoverIdx ? "#1d4ed8" : "#2563eb"}
+          />
+        );
       })}
       {uniqueXTickIdx.map((i) => {
         const xx = barX(i) + barW / 2;
@@ -85,6 +128,18 @@ export default function UsageChart({ data }: { data: Point[] }) {
           </g>
         );
       })}
+      {hovered && (
+        <g pointerEvents="none">
+          <line x1={tooltipCx} y1={padding.top} x2={tooltipCx} y2={height - padding.bottom} stroke="#64748b" strokeDasharray="3,3" />
+          <rect x={tooltipX} y={padding.top + 4} width={tooltipW} height={32} rx={4} fill="#111827" opacity={0.92} />
+          <text x={tooltipX + tooltipW / 2} y={padding.top + 17} fontSize="10" fill="#cbd5e1" textAnchor="middle">
+            {formatTooltipDate(new Date(hovered.reading_date))}
+          </text>
+          <text x={tooltipX + tooltipW / 2} y={padding.top + 30} fontSize="11" fontWeight="600" fill="#fff" textAnchor="middle">
+            {hovered.gallons_used.toLocaleString(undefined, { maximumFractionDigits: 1 })} gal
+          </text>
+        </g>
+      )}
     </svg>
   );
 }
