@@ -1,15 +1,26 @@
 "use client";
 
-import { useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 
 type Point = { reading_date: string; gallons_used: number | null };
 
 // Lightweight inline-SVG bar chart -- no charting library dependency.
 // Deliberately simple: this is an hourly usage trace, not a general-purpose
 // chart component, so it only needs to do one thing well.
-export default function UsageChart({ data }: { data: Point[] }) {
+export default function UsageChart({
+  data,
+  miuId,
+  compareQuery = "",
+}: {
+  data: Point[];
+  miuId: string;
+  compareQuery?: string;
+}) {
+  const router = useRouter();
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const downXRef = useRef<number | null>(null);
 
   const clean = data.filter((d) => d.gallons_used !== null) as { reading_date: string; gallons_used: number }[];
   if (clean.length < 2) {
@@ -69,6 +80,22 @@ export default function UsageChart({ data }: { data: Point[] }) {
   const handlePointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     setHoverIdx(indexAtClientX(e.currentTarget, e.clientX));
   };
+  const handlePointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
+    downXRef.current = e.clientX;
+    handlePointerMove(e);
+  };
+
+  // Drilling into a specific day only makes sense from a multi-day view --
+  // a single-day view (the "Today" toggle) is already as granular as it gets.
+  const clickable = !isSingleDay;
+  const handleClick = (e: ReactMouseEvent<SVGSVGElement>) => {
+    // A drag to scrub the tooltip ends in a click too -- only treat it as a
+    // navigation tap when the pointer barely moved between down and up.
+    const draggedPx = downXRef.current === null ? 0 : Math.abs(e.clientX - downXRef.current);
+    if (!clickable || hoverIdx === null || draggedPx > 8) return;
+    const dateStr = clean[hoverIdx].reading_date.slice(0, 10);
+    router.push(`/meters/${miuId}?view=1&date=${dateStr}${compareQuery}`);
+  };
 
   const hovered = hoverIdx !== null ? clean[hoverIdx] : null;
   const tooltipCx = hoverIdx !== null ? barX(hoverIdx) + barW / 2 : 0;
@@ -76,70 +103,88 @@ export default function UsageChart({ data }: { data: Point[] }) {
   const tooltipX = Math.min(Math.max(tooltipCx - tooltipW / 2, padding.left), width - padding.right - tooltipW);
 
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="w-full h-auto touch-none"
-      onPointerMove={handlePointerMove}
-      onPointerDown={handlePointerMove}
-      onPointerLeave={() => setHoverIdx(null)}
-    >
-      {yTicks.map((v, i) => {
-        const yy = y(v);
-        return (
-          <g key={i}>
-            <line x1={padding.left} y1={yy} x2={width - padding.right} y2={yy} stroke="#f1f5f9" />
-            <text x={padding.left - 6} y={yy + 3} fontSize="10" fill="#9ca3af" textAnchor="end">
-              {v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+    <div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className={`w-full h-auto touch-none ${clickable ? "cursor-pointer" : ""}`}
+        onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerDown}
+        onPointerLeave={() => setHoverIdx(null)}
+        onClick={handleClick}
+      >
+        {yTicks.map((v, i) => {
+          const yy = y(v);
+          return (
+            <g key={i}>
+              <line x1={padding.left} y1={yy} x2={width - padding.right} y2={yy} stroke="#f1f5f9" />
+              <text x={padding.left - 6} y={yy + 3} fontSize="10" fill="#9ca3af" textAnchor="end">
+                {v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </text>
+            </g>
+          );
+        })}
+        <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#cbd5e1" />
+        <line
+          x1={padding.left}
+          y1={height - padding.bottom}
+          x2={width - padding.right}
+          y2={height - padding.bottom}
+          stroke="#cbd5e1"
+        />
+        {clean.map((d, i) => {
+          const bx = barX(i);
+          const by = y(d.gallons_used);
+          return (
+            <rect
+              key={i}
+              x={bx}
+              y={by}
+              width={barW}
+              height={height - padding.bottom - by}
+              fill={i === hoverIdx ? "#1d4ed8" : "#2563eb"}
+            />
+          );
+        })}
+        {uniqueXTickIdx.map((i) => {
+          const xx = barX(i) + barW / 2;
+          const d = new Date(clean[i].reading_date);
+          return (
+            <g key={i}>
+              <line x1={xx} y1={height - padding.bottom} x2={xx} y2={height - padding.bottom + 4} stroke="#cbd5e1" />
+              <text x={xx} y={height - 6} fontSize="10" fill="#9ca3af" textAnchor="middle">
+                {formatTick(d)}
+              </text>
+            </g>
+          );
+        })}
+        {hovered && (
+          <g pointerEvents="none">
+            <line
+              x1={tooltipCx}
+              y1={padding.top}
+              x2={tooltipCx}
+              y2={height - padding.bottom}
+              stroke="#64748b"
+              strokeDasharray="3,3"
+            />
+            <rect x={tooltipX} y={padding.top + 4} width={tooltipW} height={32} rx={4} fill="#111827" opacity={0.92} />
+            <text x={tooltipX + tooltipW / 2} y={padding.top + 17} fontSize="10" fill="#cbd5e1" textAnchor="middle">
+              {formatTooltipDate(new Date(hovered.reading_date))}
+            </text>
+            <text
+              x={tooltipX + tooltipW / 2}
+              y={padding.top + 30}
+              fontSize="11"
+              fontWeight="600"
+              fill="#fff"
+              textAnchor="middle"
+            >
+              {hovered.gallons_used.toLocaleString(undefined, { maximumFractionDigits: 1 })} gal
             </text>
           </g>
-        );
-      })}
-      <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#cbd5e1" />
-      <line
-        x1={padding.left}
-        y1={height - padding.bottom}
-        x2={width - padding.right}
-        y2={height - padding.bottom}
-        stroke="#cbd5e1"
-      />
-      {clean.map((d, i) => {
-        const bx = barX(i);
-        const by = y(d.gallons_used);
-        return (
-          <rect
-            key={i}
-            x={bx}
-            y={by}
-            width={barW}
-            height={height - padding.bottom - by}
-            fill={i === hoverIdx ? "#1d4ed8" : "#2563eb"}
-          />
-        );
-      })}
-      {uniqueXTickIdx.map((i) => {
-        const xx = barX(i) + barW / 2;
-        const d = new Date(clean[i].reading_date);
-        return (
-          <g key={i}>
-            <line x1={xx} y1={height - padding.bottom} x2={xx} y2={height - padding.bottom + 4} stroke="#cbd5e1" />
-            <text x={xx} y={height - 6} fontSize="10" fill="#9ca3af" textAnchor="middle">
-              {formatTick(d)}
-            </text>
-          </g>
-        );
-      })}
-      {hovered && (
-        <g pointerEvents="none">
-          <line x1={tooltipCx} y1={padding.top} x2={tooltipCx} y2={height - padding.bottom} stroke="#64748b" strokeDasharray="3,3" />
-          <rect x={tooltipX} y={padding.top + 4} width={tooltipW} height={32} rx={4} fill="#111827" opacity={0.92} />
-          <text x={tooltipX + tooltipW / 2} y={padding.top + 17} fontSize="10" fill="#cbd5e1" textAnchor="middle">
-            {formatTooltipDate(new Date(hovered.reading_date))}
-          </text>
-          <text x={tooltipX + tooltipW / 2} y={padding.top + 30} fontSize="11" fontWeight="600" fill="#fff" textAnchor="middle">
-            {hovered.gallons_used.toLocaleString(undefined, { maximumFractionDigits: 1 })} gal
-          </text>
-        </g>
-      )}
-    </svg>
+        )}
+      </svg>
+      {clickable && <p className="text-xs text-gray-400 mt-1">Click a bar to see that day&rsquo;s hourly usage.</p>}
+    </div>
   );
 }

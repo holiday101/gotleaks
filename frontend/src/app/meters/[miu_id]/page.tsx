@@ -39,12 +39,26 @@ function fmt(v: number | null) {
   return v === null || v === undefined ? "" : v.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
+// Local-calendar-day arithmetic on a "YYYY-MM-DD" string -- avoids the
+// UTC-shift bugs that new Date(s).toISOString() would introduce for dates
+// near a timezone boundary.
+function addDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
+function formatShortDate(dateStr: string) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export default async function MeterDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ miu_id: string }>;
-  searchParams: Promise<{ view?: string; compare?: string }>;
+  searchParams: Promise<{ view?: string; compare?: string; date?: string }>;
 }) {
   const session = await getSession();
   if (!hasRole(session, "viewer")) {
@@ -60,6 +74,13 @@ export default async function MeterDetailPage({
   const view = VIEWS.find((v) => v.key === sp.view) ?? VIEWS[0];
   const compareWindow = sp.compare === "month" ? "month" : "week";
   const compareDays = compareWindow === "month" ? 30 : 7;
+  const compareQuery = sp.compare ? `&compare=${sp.compare}` : "";
+
+  // An explicit `date` anchors the usage window to a specific calendar day
+  // (set by Prev/Next or by clicking a bar in a multi-day view) instead of
+  // the meter's most recent reading -- validated since it round-trips
+  // through a URL.
+  const explicitDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : undefined;
 
   let info: MeterInfo | null = null;
   try {
@@ -71,11 +92,33 @@ export default async function MeterDetailPage({
   let usage: UsagePoint[] | null = null;
   let usageError: string | null = null;
   try {
-    const qs = view.days === null ? "all=true" : `days=${view.days}`;
+    let qs: string;
+    if (view.days === null) {
+      qs = "all=true";
+    } else if (explicitDate) {
+      const untilDay = addDays(explicitDate, 1);
+      const sinceDay = addDays(explicitDate, 1 - view.days);
+      qs = `since=${encodeURIComponent(`${sinceDay}T00:00:00`)}&until=${encodeURIComponent(`${untilDay}T00:00:00`)}`;
+    } else {
+      qs = `days=${view.days}`;
+    }
     usage = await serverFetch(`/api/meters/${encodeURIComponent(miu_id)}/usage?${qs}`);
   } catch (e) {
     usageError = e instanceof ApiError ? e.message : "Failed to load usage";
   }
+
+  // The window actually returned (its last reading's calendar day) --
+  // drives Prev/Next even on the initial, un-dated load, which anchors to
+  // the meter's own latest reading rather than an explicit date.
+  const windowEndDate = usage && usage.length > 0 ? usage[usage.length - 1].reading_date.slice(0, 10) : explicitDate;
+  const prevDate = windowEndDate && view.days !== null ? addDays(windowEndDate, -view.days) : null;
+  const nextDate = windowEndDate && view.days !== null ? addDays(windowEndDate, view.days) : null;
+  const rangeLabel =
+    windowEndDate && view.days !== null
+      ? view.days === 1
+        ? formatShortDate(windowEndDate)
+        : `${formatShortDate(addDays(windowEndDate, 1 - view.days))} – ${formatShortDate(windowEndDate)}`
+      : null;
 
   let neighbors: Neighbors | null = null;
   let neighborsError: string | null = null;
@@ -106,7 +149,7 @@ export default async function MeterDetailPage({
             {VIEWS.map((v) => (
               <Link
                 key={v.key}
-                href={`/meters/${miu_id}?view=${v.key}${sp.compare ? `&compare=${sp.compare}` : ""}`}
+                href={`/meters/${miu_id}?view=${v.key}${explicitDate ? `&date=${explicitDate}` : ""}${compareQuery}`}
                 className={`px-2 py-1 rounded border ${
                   view.key === v.key ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-600"
                 }`}
@@ -116,10 +159,35 @@ export default async function MeterDetailPage({
             ))}
           </div>
         </div>
+        {rangeLabel && (
+          <div className="flex items-center justify-center gap-4 mb-2 text-sm">
+            {prevDate ? (
+              <Link
+                href={`/meters/${miu_id}?view=${view.key}&date=${prevDate}${compareQuery}`}
+                className="text-gray-500 hover:text-gray-900"
+              >
+                &lsaquo; Prev
+              </Link>
+            ) : (
+              <span className="text-gray-300">&lsaquo; Prev</span>
+            )}
+            <span className="text-gray-700 font-medium">{rangeLabel}</span>
+            {explicitDate && nextDate ? (
+              <Link
+                href={`/meters/${miu_id}?view=${view.key}&date=${nextDate}${compareQuery}`}
+                className="text-gray-500 hover:text-gray-900"
+              >
+                Next &rsaquo;
+              </Link>
+            ) : (
+              <span className="text-gray-300">Next &rsaquo;</span>
+            )}
+          </div>
+        )}
         {usageError && (
           <div className="rounded border border-red-300 bg-red-50 text-red-800 p-4 text-sm">{usageError}</div>
         )}
-        {usage && <UsageChart data={usage} />}
+        {usage && <UsageChart data={usage} miuId={miu_id} compareQuery={compareQuery} />}
       </section>
 
       <section>
