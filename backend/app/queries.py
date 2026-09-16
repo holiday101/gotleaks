@@ -282,6 +282,7 @@ def get_map_parcels(conn, threshold: float = 10.0) -> list[dict]:
             records.append({
                 "parcel_id": row["parcel_id"], "polygon": ring,
                 "fill_color": color, "tooltip": tooltip, "is_leak": is_leak,
+                "meter_id": row["meter_id"],
             })
     return records
 
@@ -303,9 +304,10 @@ def get_map_gis_meters(conn) -> list[dict]:
     }
     extra_parcels = pd.read_sql_query(
         """
-        SELECT DISTINCT p.parcel_id, p.geometry
+        SELECT p.parcel_id, p.geometry, MIN(g.meter_id) AS meter_id
         FROM gis_meters g JOIN parcels p ON p.parcel_id = g.parcel_id
         WHERE g.parcel_id IS NOT NULL
+        GROUP BY p.parcel_id, p.geometry
         """,
         conn,
     )
@@ -329,6 +331,7 @@ def get_map_gis_meters(conn) -> list[dict]:
                 "fill_color": [70, 130, 220, 40],
                 "tooltip": f"Parcel {row['parcel_id']} (GIS survey only, no billing match)",
                 "is_leak": False,
+                "meter_id": row["meter_id"],
             })
 
     return {"points": points, "extra_parcels": extra_records}

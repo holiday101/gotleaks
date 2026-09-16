@@ -10,6 +10,7 @@ type ParcelRecord = {
   fill_color: [number, number, number, number];
   tooltip: string;
   is_leak: boolean;
+  meter_id: string | null;
 };
 
 type GisMeter = {
@@ -98,6 +99,10 @@ export default function MapClient() {
         lineWidthMinPixels: 1,
         pickable: true,
         autoHighlight: true,
+        onClick: (info) => {
+          const meterId = info.object?.meter_id;
+          if (meterId) window.open(`/meters/${meterId}`, "_blank", "noopener,noreferrer");
+        },
       }),
       new ScatterplotLayer<GisMeter>({
         id: "gis-meters",
@@ -109,6 +114,10 @@ export default function MapClient() {
         radiusMaxPixels: 8,
         pickable: true,
         autoHighlight: true,
+        onClick: (info) => {
+          const meterId = info.object?.meter_id;
+          if (meterId) window.open(`/meters/${meterId}`, "_blank", "noopener,noreferrer");
+        },
       }),
     ];
   }, [parcels, extraParcels, meters]);
@@ -134,6 +143,7 @@ export default function MapClient() {
           onViewStateChange={(e) => setViewState(e.viewState as typeof INITIAL_VIEW_STATE)}
           controller
           layers={layers}
+          getCursor={({ isHovering }) => (isHovering ? "pointer" : "grab")}
           onHover={(info) => {
             if (info.object) {
               const obj = info.object as ParcelRecord | GisMeter;
