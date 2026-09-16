@@ -184,6 +184,18 @@ def meter_usage(
         conn.close()
 
 
+@app.get("/api/meters/{miu_id}/zone-rank")
+def meter_zone_rank(miu_id: str, user=Depends(auth.require_role("viewer"))):
+    conn = db.get_conn(readonly=True)
+    try:
+        result = queries.get_meter_zone_rank(conn, miu_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="No zone ranking available for this meter")
+        return result
+    finally:
+        conn.close()
+
+
 @app.get("/api/meters/{miu_id}/neighbors")
 def meter_neighbors(
     miu_id: str,
@@ -200,8 +212,16 @@ def meter_neighbors(
         if me.empty:
             raise HTTPException(status_code=404, detail="No surveyed GPS location for this meter")
         me = me.iloc[0]
+        my_zone_label = me["lot_zone_label"]
 
+        # "Nearby" is scoped to this meter's own lot-size zone -- comparing
+        # usage across zones (e.g. a small lot vs. an HOA-sized one) isn't a
+        # meaningful comparison. Falls back to all meters if this one has no
+        # zone match of its own.
         others = coords[coords["miu_id"] != miu_id].copy()
+        if pd.notna(my_zone_label):
+            others = others[others["lot_zone_label"] == my_zone_label]
+
         r_m = 6371000.0
         phi1, phi2 = np.radians(me["lat"]), np.radians(others["lat"].to_numpy(dtype=float))
         dphi = np.radians(others["lat"].to_numpy(dtype=float) - me["lat"])
@@ -219,9 +239,12 @@ def meter_neighbors(
 
         return {
             "days": days,
+            "zone_label": None if pd.isna(my_zone_label) else my_zone_label,
             "my_avg": _safe_float(my_avg),
             "neighborhood_avg": _safe_float(nearest["window_avg"].mean()) if not nearest.empty else None,
-            "neighbors": _records(nearest.sort_values("distance_ft")),
+            # Most to least usage -- the point of this table is "how do I
+            # compare", so the heaviest zone-mates belong at the top.
+            "neighbors": _records(nearest.sort_values("window_avg", ascending=False, na_position="last")),
         }
     finally:
         conn.close()

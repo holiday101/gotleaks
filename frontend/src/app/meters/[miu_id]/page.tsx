@@ -9,6 +9,7 @@ type MeterInfo = {
   location: string | null;
   account_number: string | null;
   meter_number: string | null;
+  lot_zone_label: string | null;
 };
 type Neighbor = {
   miu_id: string;
@@ -20,9 +21,15 @@ type Neighbor = {
 };
 type Neighbors = {
   days: number;
+  zone_label: string | null;
   my_avg: number | null;
   neighborhood_avg: number | null;
   neighbors: Neighbor[];
+};
+type ZoneRank = {
+  zone_label: string;
+  rank: number;
+  total_in_zone: number;
 };
 
 // "Today" is the default -- a meter's page opens on its most recent day of
@@ -130,6 +137,15 @@ export default async function MeterDetailPage({
     neighborsError = e instanceof ApiError ? e.message : "Failed to load neighbors";
   }
 
+  // Best-effort: a meter with no usage this window or no zone match just
+  // omits the rank badge rather than surfacing an error banner for it.
+  let zoneRank: ZoneRank | null = null;
+  try {
+    zoneRank = await serverFetch(`/api/meters/${encodeURIComponent(miu_id)}/zone-rank`);
+  } catch {
+    // No badge if there's nothing to rank.
+  }
+
   const ratio = neighbors?.my_avg && neighbors?.neighborhood_avg ? neighbors.my_avg / neighbors.neighborhood_avg : null;
 
   return (
@@ -137,6 +153,20 @@ export default async function MeterDetailPage({
       <h1 className="text-2xl font-semibold mb-1">
         {info?.customer_name ? info.customer_name : `Meter ${miu_id}`}
       </h1>
+      {(info?.lot_zone_label || zoneRank) && (
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          {info?.lot_zone_label && (
+            <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+              Zone: {info.lot_zone_label}
+            </span>
+          )}
+          {zoneRank && (
+            <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+              Rank #{zoneRank.rank} of {zoneRank.total_in_zone} in zone
+            </span>
+          )}
+        </div>
+      )}
       <p className="text-sm text-gray-500 mb-6">
         {info?.customer_name && <>Meter {miu_id}{info.location ? ` -- ${info.location}` : ""} -- </>}
         Hourly usage and comparison to nearby meters.
@@ -217,6 +247,7 @@ export default async function MeterDetailPage({
             <p className="text-sm mb-4">
               This meter averaged <strong>{fmt(neighbors.my_avg)} gal/day</strong> over the last {compareWindow} vs a{" "}
               <strong>{fmt(neighbors.neighborhood_avg)} gal/day</strong> average among its 10 nearest meters
+              {neighbors.zone_label ? ` in the ${neighbors.zone_label} zone` : ""}
               {ratio !== null && (
                 <>
                   {" "}

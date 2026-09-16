@@ -85,6 +85,30 @@ def get_usage_leaderboard(conn, zones: list[str] | None = None) -> pd.DataFrame:
     return board.sort_values("total_consumption", ascending=False).reset_index(drop=True)
 
 
+def get_meter_zone_rank(conn, miu_id: str) -> dict | None:
+    """This meter's rank (1 = highest usage) among every other meter sharing
+    its lot-size zone, over the same trailing-7-day window as the Water
+    Usage leaderboard -- reuses get_usage_leaderboard's sort so "rank" means
+    the same thing here as it does on that tab. None if the meter has no
+    usage this window or no zone match."""
+    board = get_usage_leaderboard(conn)
+    if board.empty:
+        return None
+    row = board[board["miu_id"] == miu_id]
+    if row.empty:
+        return None
+    zone_label = row["lot_zone_label"].iloc[0]
+    zone_board = board[board["lot_zone_label"] == zone_label].reset_index(drop=True)
+    matches = zone_board.index[zone_board["miu_id"] == miu_id]
+    if len(matches) == 0:
+        return None
+    return {
+        "zone_label": zone_label,
+        "rank": int(matches[0]) + 1,
+        "total_in_zone": int(len(zone_board)),
+    }
+
+
 def get_continuous_users(conn, min_gph: float = 10.0, sort_by: str = "min_consumption") -> pd.DataFrame:
     """Meters with a zero-free week (>7 readings, zero_count==0) -- the same
     qualifying rule as the Continuous Users tab. sort_by is either
