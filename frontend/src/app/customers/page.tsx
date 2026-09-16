@@ -1,6 +1,6 @@
 import { getSession, hasRole, serverFetch, ApiError } from "@/lib/api";
 import Locked from "@/components/Locked";
-import CustomerRow from "./CustomerRow";
+import CustomerTable from "./CustomerTable";
 
 type Row = {
   account_number: string | null;
@@ -71,27 +71,7 @@ export default async function CustomersPage({
       {!error && (
         <>
           <p className="text-sm text-gray-500 mb-4">{rows.length} rows</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="text-left border-b border-gray-300">
-                  <th className="py-2 pr-4">Account</th>
-                  <th className="py-2 pr-4">Customer</th>
-                  <th className="py-2 pr-4">Address</th>
-                  <th className="py-2 pr-4">Phone</th>
-                  <th className="py-2 pr-4">Email</th>
-                  <th className="py-2 pr-4">Meter #</th>
-                  <th className="py-2 pr-4">Cycle route</th>
-                  <th className="py-2 pr-4">Lot zone</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice(0, 500).map((row) => (
-                  <CustomerRow key={row.miu_id} row={row} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CustomerTable rows={rows.slice(0, 500)} />
           {rows.length > 500 && (
             <p className="text-xs text-gray-400 mt-2">Showing first 500 of {rows.length} -- narrow with the filter above.</p>
           )}
