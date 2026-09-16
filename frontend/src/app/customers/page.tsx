@@ -1,5 +1,6 @@
 import { getSession, hasRole, serverFetch, ApiError } from "@/lib/api";
 import Locked from "@/components/Locked";
+import CustomerRow from "./CustomerRow";
 
 type Row = {
   account_number: string | null;
@@ -86,16 +87,7 @@ export default async function CustomersPage({
               </thead>
               <tbody>
                 {rows.slice(0, 500).map((row) => (
-                  <tr key={row.miu_id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-1.5 pr-4">{row.account_number}</td>
-                    <td className="py-1.5 pr-4">{row.customer_name ?? ""}</td>
-                    <td className="py-1.5 pr-4">{row.location ?? ""}</td>
-                    <td className="py-1.5 pr-4">{row.primary_phone ?? row.secondary_phone ?? ""}</td>
-                    <td className="py-1.5 pr-4">{row.email_address ?? ""}</td>
-                    <td className="py-1.5 pr-4">{row.meter_number}</td>
-                    <td className="py-1.5 pr-4 text-gray-500">{row.cycle_route ?? ""}</td>
-                    <td className="py-1.5 pr-4 text-gray-500">{row.lot_zone_label ?? ""}</td>
-                  </tr>
+                  <CustomerRow key={row.miu_id} row={row} />
                 ))}
               </tbody>
             </table>
