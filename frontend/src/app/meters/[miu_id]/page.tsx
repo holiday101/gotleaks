@@ -114,10 +114,15 @@ export default async function MeterDetailPage({
     usageError = e instanceof ApiError ? e.message : "Failed to load usage";
   }
 
-  // The window actually returned (its last reading's calendar day) --
-  // drives Prev/Next even on the initial, un-dated load, which anchors to
-  // the meter's own latest reading rather than an explicit date.
-  const windowEndDate = usage && usage.length > 0 ? usage[usage.length - 1].reading_date.slice(0, 10) : explicitDate;
+  // Prev/Next and the range label anchor to the *requested* date whenever
+  // one was given, even if that window's data has a trailing gap (meter
+  // offline, sync lag) -- using the last actually-returned reading instead
+  // would silently snap the anchor backward, making Next/Prev jump by the
+  // wrong number of days or get stuck re-visiting the same window. Only the
+  // initial, un-dated load (no explicit date yet) falls back to the meter's
+  // own latest reading to anchor on.
+  const windowEndDate =
+    explicitDate ?? (usage && usage.length > 0 ? usage[usage.length - 1].reading_date.slice(0, 10) : null);
   const prevDate = windowEndDate && view.days !== null ? addDays(windowEndDate, -view.days) : null;
   const nextDate = windowEndDate && view.days !== null ? addDays(windowEndDate, view.days) : null;
   const rangeLabel =
