@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from app import neptune_db as db
+
 
 def _hoa_predicate(name_col: str) -> str:
     """SQL predicate matching HOA/community accounts by a standalone "HOA"
@@ -63,11 +65,13 @@ def get_leak_status_window(conn):
 
 
 def get_last_data_sync(conn) -> str | None:
-    """UTC ISO timestamp of the most recently synced water-usage row, or None
-    if the database hasn't been synced yet."""
-    row = pd.read_sql_query("SELECT MAX(synced_at) AS last_synced_at FROM water_usage", conn)
-    value = row["last_synced_at"].iloc[0]
-    return None if pd.isna(value) else value
+    """UTC ISO timestamp of the last recent-usage sync run, or None if it
+    hasn't run yet. Reads the sync_state row neptune-sync.timer's own job
+    already writes on every run -- an O(1) lookup, unlike MAX(synced_at)
+    over water_usage, which is a multi-ten-million-row table with no index
+    on that column and took over 2 minutes against production."""
+    state = db.get_sync_state(conn, "auto_recent_usage_sync")
+    return state.get("synced_at") if state else None
 
 
 def get_usage_leaderboard(conn, zones: list[str] | None = None) -> pd.DataFrame:
