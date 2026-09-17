@@ -62,6 +62,14 @@ def get_leak_status_window(conn):
     return {"window_start": row["window_start"].iloc[0], "window_end": row["window_end"].iloc[0]}
 
 
+def get_last_data_sync(conn) -> str | None:
+    """UTC ISO timestamp of the most recently synced water-usage row, or None
+    if the database hasn't been synced yet."""
+    row = pd.read_sql_query("SELECT MAX(synced_at) AS last_synced_at FROM water_usage", conn)
+    value = row["last_synced_at"].iloc[0]
+    return None if pd.isna(value) else value
+
+
 def get_usage_leaderboard(conn, zones: list[str] | None = None) -> pd.DataFrame:
     """Every meter with usage in the trailing 7 days, ranked by total gallons
     (highest first), with lot-size zone for filtering -- the same shape as

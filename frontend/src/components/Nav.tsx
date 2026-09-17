@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getSession, hasRole } from "@/lib/api";
+import { getSession, hasRole, serverFetch } from "@/lib/api";
 import LogoutButton from "./LogoutButton";
 
 const LINKS: { href: string; label: string; minRole: "viewer" | "admin" | "global" }[] = [
@@ -13,8 +13,23 @@ const LINKS: { href: string; label: string; minRole: "viewer" | "admin" | "globa
   { href: "/ask", label: "Ask AI", minRole: "global" },
 ];
 
+function formatRelativeTime(iso: string): string {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
 export default async function Nav() {
   const session = await getSession();
+  const lastUpdated = session
+    ? await serverFetch("/api/sync/last-updated")
+        .then((r) => r.last_synced_at as string | null)
+        .catch(() => null)
+    : null;
 
   return (
     <header className="border-b border-gray-200">
@@ -43,6 +58,11 @@ export default async function Nav() {
               <span className="text-gray-500">
                 {session.email} ({session.role})
               </span>
+              {lastUpdated && (
+                <span className="text-gray-400" title={new Date(lastUpdated).toString()}>
+                  Data updated {formatRelativeTime(lastUpdated)}
+                </span>
+              )}
               {session.public_mode && <LogoutButton />}
             </>
           ) : (

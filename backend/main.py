@@ -521,6 +521,15 @@ def _get_client(conn):
         raise HTTPException(status_code=500, detail=f"Missing required setting in .env: {e}")
 
 
+@app.get("/api/sync/last-updated")
+def sync_last_updated(user=Depends(auth.require_role("viewer"))):
+    conn = db.get_conn(readonly=True)
+    try:
+        return {"last_synced_at": queries.get_last_data_sync(conn)}
+    finally:
+        conn.close()
+
+
 @app.get("/api/sync/status")
 def sync_status(user=Depends(auth.require_role("global"))):
     if not ALLOW_SYNC:
