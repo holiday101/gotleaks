@@ -52,7 +52,7 @@ export default async function CustomersPage({
         system and lot-size zone.
       </p>
 
-      <form className="mb-4" action="/customers">
+      <form className="mb-4" action={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/customers`}>
         <input
           type="text"
           name="q"
