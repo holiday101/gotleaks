@@ -230,6 +230,7 @@ CREATE TABLE IF NOT EXISTS meter_leak_status (
 
 CREATE INDEX IF NOT EXISTS idx_water_usage_miu ON water_usage(miu_id);
 CREATE INDEX IF NOT EXISTS idx_water_usage_date ON water_usage(reading_date);
+CREATE INDEX IF NOT EXISTS idx_water_usage_synced_at ON water_usage(synced_at);
 CREATE INDEX IF NOT EXISTS idx_customers_account ON customers(account_number);
 CREATE INDEX IF NOT EXISTS idx_billing_account ON customer_billing(account_number);
 CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
