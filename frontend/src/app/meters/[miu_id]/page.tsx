@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getSession, hasRole, serverFetch, ApiError } from "@/lib/api";
 import Locked from "@/components/Locked";
 import UsageChart from "@/components/UsageChart";
+import NeighborsTable from "./NeighborsTable";
 
 type UsagePoint = { reading_date: string; gallons_used: number | null };
 type MeterInfo = {
@@ -260,39 +261,7 @@ export default async function MeterDetailPage({
                 </>
               )}
             </p>
-            <div className="overflow-x-auto mb-6">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="text-left border-b border-gray-300">
-                    <th className="py-2 pr-4">Distance (ft)</th>
-                    <th className="py-2 pr-4">Customer</th>
-                    <th className="py-2 pr-4">Address</th>
-                    <th className="py-2 pr-4">Lot zone</th>
-                    <th className="py-2 pr-4 text-right">Avg (gal/day)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {neighbors.neighbors.map((n) => {
-                    const isMe = n.miu_id === miu_id;
-                    return (
-                      <tr
-                        key={n.miu_id}
-                        className={`border-b border-gray-100 ${isMe ? "bg-blue-50 font-semibold" : ""}`}
-                      >
-                        <td className="py-1.5 pr-4">{n.distance_ft.toFixed(0)}</td>
-                        <td className="py-1.5 pr-4">
-                          {n.customer_name ?? ""}
-                          {isMe && <span className="text-blue-600"> (this meter)</span>}
-                        </td>
-                        <td className="py-1.5 pr-4">{n.address ?? ""}</td>
-                        <td className="py-1.5 pr-4 text-gray-500">{n.lot_zone_label ?? ""}</td>
-                        <td className="py-1.5 pr-4 text-right">{fmt(n.window_avg)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <NeighborsTable neighbors={neighbors.neighbors} miuId={miu_id} />
           </>
         )}
       </section>
