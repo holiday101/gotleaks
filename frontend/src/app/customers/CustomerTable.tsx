@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+const NO_ZONE_LABEL = "No parcel match";
 
 type Row = {
   account_number: string | null;
@@ -30,9 +32,33 @@ type PopupState = {
   todayTotal: number | null;
 };
 
+function zoneLabelOf(row: Row): string {
+  return row.lot_zone_label ?? NO_ZONE_LABEL;
+}
+
+function getZoneOptions(rows: Row[]): string[] {
+  return Array.from(new Set(rows.map(zoneLabelOf))).sort();
+}
+
+const filterInputClass =
+  "mt-1 w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs font-normal";
+
 export default function CustomerTable({ rows }: { rows: Row[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [popup, setPopup] = useState<PopupState | null>(null);
+
+  const [account, setAccount] = useState("");
+  const [customer, setCustomer] = useState("");
+  const [address, setAddress] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [meterNumber, setMeterNumber] = useState("");
+  const [cycleRoute, setCycleRoute] = useState("");
+
+  const zoneOptions = useMemo(() => getZoneOptions(rows), [rows]);
+  const [selectedZones, setSelectedZones] = useState<Set<string>>(() => new Set(zoneOptions));
+  const [zoneMenuOpen, setZoneMenuOpen] = useState(false);
+  const zoneMenuRef = useRef<HTMLTableCellElement>(null);
 
   useEffect(() => {
     if (!popup) return;
@@ -44,6 +70,80 @@ export default function CustomerTable({ rows }: { rows: Row[] }) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [popup]);
+
+  useEffect(() => {
+    if (!zoneMenuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (zoneMenuRef.current && !zoneMenuRef.current.contains(e.target as Node)) {
+        setZoneMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [zoneMenuOpen]);
+
+  function toggleZone(zone: string) {
+    setSelectedZones((prev) => {
+      const next = new Set(prev);
+      if (next.has(zone)) next.delete(zone);
+      else next.add(zone);
+      return next;
+    });
+  }
+
+  const allZonesSelected = selectedZones.size === zoneOptions.length;
+  const zoneSummary = allZonesSelected
+    ? "All zones"
+    : selectedZones.size === 0
+      ? "None selected"
+      : `${selectedZones.size} of ${zoneOptions.length} selected`;
+
+  const filtered = useMemo(() => {
+    const accountNeedle = account.trim().length >= 3 ? account.trim().toLowerCase() : null;
+    const customerNeedle = customer.trim().length >= 3 ? customer.trim().toLowerCase() : null;
+    const addressNeedle = address.trim().length >= 3 ? address.trim().toLowerCase() : null;
+    const phoneNeedle = phone.trim().length >= 3 ? phone.trim().toLowerCase() : null;
+    const emailNeedle = email.trim().length >= 3 ? email.trim().toLowerCase() : null;
+    const meterNeedle = meterNumber.trim().length >= 3 ? meterNumber.trim().toLowerCase() : null;
+    const cycleNeedle = cycleRoute.trim().length >= 3 ? cycleRoute.trim().toLowerCase() : null;
+
+    return rows.filter((row) => {
+      if (accountNeedle && !(row.account_number ?? "").toLowerCase().includes(accountNeedle)) return false;
+      if (customerNeedle && !(row.customer_name ?? "").toLowerCase().includes(customerNeedle)) return false;
+      if (addressNeedle && !(row.location ?? "").toLowerCase().includes(addressNeedle)) return false;
+      if (
+        phoneNeedle &&
+        !`${row.primary_phone ?? ""} ${row.secondary_phone ?? ""}`.toLowerCase().includes(phoneNeedle)
+      )
+        return false;
+      if (emailNeedle && !(row.email_address ?? "").toLowerCase().includes(emailNeedle)) return false;
+      if (meterNeedle && !(row.meter_number ?? "").toLowerCase().includes(meterNeedle)) return false;
+      if (cycleNeedle && !(row.cycle_route ?? "").toLowerCase().includes(cycleNeedle)) return false;
+      if (!selectedZones.has(zoneLabelOf(row))) return false;
+      return true;
+    });
+  }, [rows, account, customer, address, phone, email, meterNumber, cycleRoute, selectedZones]);
+
+  const hasFilters =
+    Boolean(account) ||
+    Boolean(customer) ||
+    Boolean(address) ||
+    Boolean(phone) ||
+    Boolean(email) ||
+    Boolean(meterNumber) ||
+    Boolean(cycleRoute) ||
+    !allZonesSelected;
+
+  function clearFilters() {
+    setAccount("");
+    setCustomer("");
+    setAddress("");
+    setPhone("");
+    setEmail("");
+    setMeterNumber("");
+    setCycleRoute("");
+    setSelectedZones(new Set(zoneOptions));
+  }
 
   async function showRowPopup(row: Row, clientX: number, clientY: number) {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -68,22 +168,137 @@ export default function CustomerTable({ rows }: { rows: Row[] }) {
 
   return (
     <div ref={containerRef} className="relative">
+      <div className="mb-2 flex items-center justify-between text-sm text-gray-500">
+        <span>
+          {filtered.length === rows.length
+            ? `${rows.length} rows`
+            : `${filtered.length} of ${rows.length} rows`}
+        </span>
+        {hasFilters && (
+          <button type="button" onClick={clearFilters} className="text-gray-400 underline">
+            Clear filters
+          </button>
+        )}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="text-left border-b border-gray-300">
-              <th className="py-2 pr-4">Account</th>
-              <th className="py-2 pr-4">Customer</th>
-              <th className="py-2 pr-4">Address</th>
-              <th className="py-2 pr-4">Phone</th>
-              <th className="py-2 pr-4">Email</th>
-              <th className="py-2 pr-4">Meter #</th>
-              <th className="py-2 pr-4">Cycle route</th>
-              <th className="py-2 pr-4">Lot zone</th>
+              <th className="py-2 pr-4 align-top">
+                Account
+                <input
+                  type="text"
+                  value={account}
+                  onChange={(e) => setAccount(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Customer
+                <input
+                  type="text"
+                  value={customer}
+                  onChange={(e) => setCustomer(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Address
+                <input
+                  type="text"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Phone
+                <input
+                  type="text"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Email
+                <input
+                  type="text"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Meter #
+                <input
+                  type="text"
+                  value={meterNumber}
+                  onChange={(e) => setMeterNumber(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Cycle route
+                <input
+                  type="text"
+                  value={cycleRoute}
+                  onChange={(e) => setCycleRoute(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top relative" ref={zoneMenuRef}>
+                Lot zone
+                <button
+                  type="button"
+                  onClick={() => setZoneMenuOpen((o) => !o)}
+                  className={`${filterInputClass} bg-white text-left truncate`}
+                >
+                  {zoneSummary}
+                </button>
+                {zoneMenuOpen && (
+                  <div className="absolute z-10 mt-1 w-56 max-h-64 overflow-y-auto rounded border border-gray-300 bg-white shadow-lg p-2 text-xs font-normal">
+                    <div className="flex justify-between mb-1 pb-1 border-b border-gray-100">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedZones(new Set(zoneOptions))}
+                        className="text-blue-600 hover:underline"
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedZones(new Set())}
+                        className="text-blue-600 hover:underline"
+                      >
+                        None
+                      </button>
+                    </div>
+                    {zoneOptions.map((zone) => (
+                      <label key={zone} className="flex items-center gap-1.5 py-0.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedZones.has(zone)}
+                          onChange={() => toggleZone(zone)}
+                        />
+                        <span>{zone}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {filtered.slice(0, 500).map((row) => (
               <tr
                 key={row.miu_id}
                 onClick={(e) => showRowPopup(row, e.clientX, e.clientY)}
@@ -96,12 +311,15 @@ export default function CustomerTable({ rows }: { rows: Row[] }) {
                 <td className="py-1.5 pr-4">{row.email_address ?? ""}</td>
                 <td className="py-1.5 pr-4">{row.meter_number}</td>
                 <td className="py-1.5 pr-4 text-gray-500">{row.cycle_route ?? ""}</td>
-                <td className="py-1.5 pr-4 text-gray-500">{row.lot_zone_label ?? ""}</td>
+                <td className="py-1.5 pr-4 text-gray-500">{zoneLabelOf(row)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {filtered.length > 500 && (
+        <p className="text-xs text-gray-400 mt-2">Showing first 500 of {filtered.length} -- narrow with the filters above.</p>
+      )}
 
       {popup && (
         <div
