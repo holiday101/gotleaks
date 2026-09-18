@@ -97,12 +97,7 @@ export default async function ContinuousUsersPage({
           No leak-status data computed yet -- run a sync first.
         </div>
       )}
-      {data && data.window && (
-        <>
-          <p className="text-sm text-gray-500 mb-4">{data.rows.length} qualifying meters</p>
-          <ContinuousUsersTable rows={data.rows} canSend={hasRole(session, "admin")} />
-        </>
-      )}
+      {data && data.window && <ContinuousUsersTable rows={data.rows} canSend={hasRole(session, "admin")} />}
     </main>
   );
 }

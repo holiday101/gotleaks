@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 type Row = {
   miu_id: string;
@@ -22,6 +22,40 @@ function fmt(v: number | null) {
   return v === null || v === undefined ? "" : v.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
+function fmtDate(v: string | null) {
+  return v ? new Date(v).toLocaleDateString() : "";
+}
+
+// Numeric columns accept an optional comparison operator (<, <=, >, >=) in
+// front of the number -- e.g. ">=50" to find the worst offenders. A bare
+// number without an operator matches exactly.
+function parseNumericFilter(raw: string): ((n: number | null) => boolean) | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(<=|>=|<|>|=)?\s*(-?\d+(?:\.\d+)?)$/);
+  if (!match) return null;
+  const op = match[1] ?? "=";
+  const value = parseFloat(match[2]);
+  return (n) => {
+    if (n === null || n === undefined) return false;
+    switch (op) {
+      case "<":
+        return n < value;
+      case "<=":
+        return n <= value;
+      case ">":
+        return n > value;
+      case ">=":
+        return n >= value;
+      default:
+        return n === value;
+    }
+  };
+}
+
+const filterInputClass =
+  "mt-1 w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs font-normal";
+
 type SendResult = {
   sent: { miu_id: string; email: string }[];
   skipped: { miu_id: string; reason: string }[];
@@ -39,7 +73,66 @@ export default function ContinuousUsersTable({ rows, canSend }: { rows: Row[]; c
   const [result, setResult] = useState<SendResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const sendable = rows.filter((r) => !!r.email_address);
+  const [customer, setCustomer] = useState("");
+  const [address, setAddress] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [rawFloor, setRawFloor] = useState("");
+  const [roll3Floor, setRoll3Floor] = useState("");
+  const [total, setTotal] = useState("");
+  const [since, setSince] = useState("");
+
+  const ranked = useMemo(() => rows.map((row, i) => ({ ...row, rank: i + 1 })), [rows]);
+
+  const filtered = useMemo(() => {
+    const customerNeedle = customer.trim().length >= 3 ? customer.trim().toLowerCase() : null;
+    const addressNeedle = address.trim().length >= 3 ? address.trim().toLowerCase() : null;
+    const phoneNeedle = phone.trim().length >= 3 ? phone.trim().toLowerCase() : null;
+    const emailNeedle = email.trim().length >= 3 ? email.trim().toLowerCase() : null;
+    const sinceNeedle = since.trim().length >= 3 ? since.trim().toLowerCase() : null;
+    const rawFloorMatch = parseNumericFilter(rawFloor);
+    const roll3Match = parseNumericFilter(roll3Floor);
+    const totalMatch = parseNumericFilter(total);
+
+    return ranked.filter((row) => {
+      if (customerNeedle && !(row.customer_name ?? "").toLowerCase().includes(customerNeedle)) return false;
+      if (addressNeedle && !(row.address ?? "").toLowerCase().includes(addressNeedle)) return false;
+      if (
+        phoneNeedle &&
+        !`${row.primary_phone ?? ""} ${row.secondary_phone ?? ""}`.toLowerCase().includes(phoneNeedle)
+      )
+        return false;
+      if (emailNeedle && !(row.email_address ?? "").toLowerCase().includes(emailNeedle)) return false;
+      if (rawFloorMatch && !rawFloorMatch(row.min_consumption)) return false;
+      if (roll3Match && !roll3Match(row.roll3_min_consumption)) return false;
+      if (totalMatch && !totalMatch(row.total_consumption)) return false;
+      if (sinceNeedle && !fmtDate(row.streak_start).toLowerCase().includes(sinceNeedle)) return false;
+      return true;
+    });
+  }, [ranked, customer, address, phone, email, rawFloor, roll3Floor, total, since]);
+
+  const hasFilters =
+    Boolean(customer) ||
+    Boolean(address) ||
+    Boolean(phone) ||
+    Boolean(email) ||
+    Boolean(rawFloor) ||
+    Boolean(roll3Floor) ||
+    Boolean(total) ||
+    Boolean(since);
+
+  function clearFilters() {
+    setCustomer("");
+    setAddress("");
+    setPhone("");
+    setEmail("");
+    setRawFloor("");
+    setRoll3Floor("");
+    setTotal("");
+    setSince("");
+  }
+
+  const sendable = filtered.filter((r) => !!r.email_address);
   const selectedRows = rows.filter((r) => selected.has(r.miu_id));
   const allSendableSelected = sendable.length > 0 && sendable.every((r) => selected.has(r.miu_id));
 
@@ -53,9 +146,15 @@ export default function ContinuousUsersTable({ rows, canSend }: { rows: Row[]; c
   }
 
   function toggleAll() {
-    setSelected(() => {
-      if (allSendableSelected) return new Set();
-      return new Set(sendable.map((r) => r.miu_id));
+    setSelected((prev) => {
+      if (allSendableSelected) {
+        const next = new Set(prev);
+        for (const r of sendable) next.delete(r.miu_id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const r of sendable) next.add(r.miu_id);
+      return next;
     });
   }
 
@@ -115,6 +214,19 @@ export default function ContinuousUsersTable({ rows, canSend }: { rows: Row[]; c
 
   return (
     <div>
+      <div className="mb-2 flex items-center justify-between text-sm text-gray-500">
+        <span>
+          {filtered.length === ranked.length
+            ? `${ranked.length} qualifying meters`
+            : `${filtered.length} of ${ranked.length} qualifying meters`}
+        </span>
+        {hasFilters && (
+          <button type="button" onClick={clearFilters} className="text-gray-400 underline">
+            Clear filters
+          </button>
+        )}
+      </div>
+
       {canSend && selected.size > 0 && (
         <div className="flex items-center gap-3 mb-3 text-sm bg-blue-50 border border-blue-200 rounded px-3 py-2">
           <span>{selected.size} selected</span>
@@ -137,18 +249,90 @@ export default function ContinuousUsersTable({ rows, canSend }: { rows: Row[]; c
                 </th>
               )}
               <th className="py-2 pr-4">#</th>
-              <th className="py-2 pr-4">Customer</th>
-              <th className="py-2 pr-4">Address</th>
-              <th className="py-2 pr-4">Phone</th>
-              <th className="py-2 pr-4">Email</th>
-              <th className="py-2 pr-4 text-right">Raw floor (gal/hr)</th>
-              <th className="py-2 pr-4 text-right">3-hr rolling floor</th>
-              <th className="py-2 pr-4 text-right">7-day total (gal)</th>
-              <th className="py-2 pr-4">Continuous since</th>
+              <th className="py-2 pr-4 align-top">
+                Customer
+                <input
+                  type="text"
+                  value={customer}
+                  onChange={(e) => setCustomer(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Address
+                <input
+                  type="text"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Phone
+                <input
+                  type="text"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Email
+                <input
+                  type="text"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 text-right align-top">
+                Raw floor (gal/hr)
+                <input
+                  type="text"
+                  value={rawFloor}
+                  onChange={(e) => setRawFloor(e.target.value)}
+                  placeholder="e.g. >=50"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 text-right align-top">
+                3-hr rolling floor
+                <input
+                  type="text"
+                  value={roll3Floor}
+                  onChange={(e) => setRoll3Floor(e.target.value)}
+                  placeholder="e.g. >=50"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 text-right align-top">
+                7-day total (gal)
+                <input
+                  type="text"
+                  value={total}
+                  onChange={(e) => setTotal(e.target.value)}
+                  placeholder="e.g. >1000"
+                  className={filterInputClass}
+                />
+              </th>
+              <th className="py-2 pr-4 align-top">
+                Continuous since
+                <input
+                  type="text"
+                  value={since}
+                  onChange={(e) => setSince(e.target.value)}
+                  placeholder="3+ chars"
+                  className={filterInputClass}
+                />
+              </th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, i) => (
+            {filtered.map((row) => (
               <tr key={row.miu_id} className="border-b border-gray-100 hover:bg-gray-50">
                 {canSend && (
                   <td className="py-1.5 pr-2">
@@ -161,7 +345,7 @@ export default function ContinuousUsersTable({ rows, canSend }: { rows: Row[]; c
                     />
                   </td>
                 )}
-                <td className="py-1.5 pr-4 text-gray-400">{i + 1}</td>
+                <td className="py-1.5 pr-4 text-gray-400">{row.rank}</td>
                 <td className="py-1.5 pr-4">
                   <Link href={`/meters/${row.miu_id}`} className="text-blue-700 hover:underline">
                     {row.customer_name ?? "(no billing match)"}
@@ -173,9 +357,7 @@ export default function ContinuousUsersTable({ rows, canSend }: { rows: Row[]; c
                 <td className="py-1.5 pr-4 text-right">{fmt(row.min_consumption)}</td>
                 <td className="py-1.5 pr-4 text-right font-medium">{fmt(row.roll3_min_consumption)}</td>
                 <td className="py-1.5 pr-4 text-right">{fmt(row.total_consumption)}</td>
-                <td className="py-1.5 pr-4 text-gray-500">
-                  {row.streak_start ? new Date(row.streak_start).toLocaleDateString() : ""}
-                </td>
+                <td className="py-1.5 pr-4 text-gray-500">{fmtDate(row.streak_start)}</td>
               </tr>
             ))}
           </tbody>
