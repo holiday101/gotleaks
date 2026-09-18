@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type LeaderboardRow = {
   miu_id: string;
@@ -48,33 +48,69 @@ function parseNumericFilter(raw: string): ((n: number | null) => boolean) | null
   };
 }
 
+function getZoneOptions(rows: LeaderboardRow[]): string[] {
+  return Array.from(
+    new Set(rows.map((r) => r.lot_zone_label).filter((z): z is string => Boolean(z)))
+  ).sort();
+}
+
 const filterInputClass =
   "mt-1 w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs font-normal";
 
 export default function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
   const [customer, setCustomer] = useState("");
   const [address, setAddress] = useState("");
-  const [lotZone, setLotZone] = useState("");
   const [readings, setReadings] = useState("");
+
+  const zoneOptions = useMemo(() => getZoneOptions(rows), [rows]);
+  const [selectedZones, setSelectedZones] = useState<Set<string>>(() => new Set(zoneOptions));
+  const [zoneMenuOpen, setZoneMenuOpen] = useState(false);
+  const zoneMenuRef = useRef<HTMLTableCellElement>(null);
+
+  useEffect(() => {
+    if (!zoneMenuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (zoneMenuRef.current && !zoneMenuRef.current.contains(e.target as Node)) {
+        setZoneMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [zoneMenuOpen]);
+
+  function toggleZone(zone: string) {
+    setSelectedZones((prev) => {
+      const next = new Set(prev);
+      if (next.has(zone)) next.delete(zone);
+      else next.add(zone);
+      return next;
+    });
+  }
+
+  const allZonesSelected = selectedZones.size === zoneOptions.length;
+  const zoneSummary = allZonesSelected
+    ? "All zones"
+    : selectedZones.size === 0
+      ? "None selected"
+      : `${selectedZones.size} of ${zoneOptions.length} selected`;
 
   const ranked = useMemo(() => rows.map((row, i) => ({ ...row, rank: i + 1 })), [rows]);
 
   const filtered = useMemo(() => {
     const customerNeedle = customer.trim().length >= 3 ? customer.trim().toLowerCase() : null;
     const addressNeedle = address.trim().length >= 3 ? address.trim().toLowerCase() : null;
-    const lotZoneNeedle = lotZone.trim().length >= 3 ? lotZone.trim().toLowerCase() : null;
     const readingsMatch = parseNumericFilter(readings);
 
     return ranked.filter((row) => {
       if (customerNeedle && !(row.customer_name ?? "").toLowerCase().includes(customerNeedle)) return false;
       if (addressNeedle && !(row.location ?? "").toLowerCase().includes(addressNeedle)) return false;
-      if (lotZoneNeedle && !(row.lot_zone_label ?? "").toLowerCase().includes(lotZoneNeedle)) return false;
+      if (!selectedZones.has(row.lot_zone_label ?? "")) return false;
       if (readingsMatch && !readingsMatch(row.reading_count)) return false;
       return true;
     });
-  }, [ranked, customer, address, lotZone, readings]);
+  }, [ranked, customer, address, selectedZones, readings]);
 
-  const hasFilters = customer || address || lotZone || readings;
+  const hasFilters = Boolean(customer) || Boolean(address) || Boolean(readings) || !allZonesSelected;
 
   return (
     <div>
@@ -90,8 +126,8 @@ export default function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
             onClick={() => {
               setCustomer("");
               setAddress("");
-              setLotZone("");
               setReadings("");
+              setSelectedZones(new Set(zoneOptions));
             }}
             className="text-gray-400 underline"
           >
@@ -125,15 +161,45 @@ export default function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
                   className={filterInputClass}
                 />
               </th>
-              <th className="py-2 pr-4 align-top">
+              <th className="py-2 pr-4 align-top relative" ref={zoneMenuRef}>
                 Lot zone
-                <input
-                  type="text"
-                  value={lotZone}
-                  onChange={(e) => setLotZone(e.target.value)}
-                  placeholder="3+ chars"
-                  className={filterInputClass}
-                />
+                <button
+                  type="button"
+                  onClick={() => setZoneMenuOpen((o) => !o)}
+                  className={`${filterInputClass} bg-white text-left truncate`}
+                >
+                  {zoneSummary}
+                </button>
+                {zoneMenuOpen && (
+                  <div className="absolute z-10 mt-1 w-56 max-h-64 overflow-y-auto rounded border border-gray-300 bg-white shadow-lg p-2 text-xs font-normal">
+                    <div className="flex justify-between mb-1 pb-1 border-b border-gray-100">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedZones(new Set(zoneOptions))}
+                        className="text-blue-600 hover:underline"
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedZones(new Set())}
+                        className="text-blue-600 hover:underline"
+                      >
+                        None
+                      </button>
+                    </div>
+                    {zoneOptions.map((zone) => (
+                      <label key={zone} className="flex items-center gap-1.5 py-0.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedZones.has(zone)}
+                          onChange={() => toggleZone(zone)}
+                        />
+                        <span>{zone}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </th>
               <th className="py-2 pr-4 text-right">7-day total (gal)</th>
               <th className="py-2 pr-4 text-right">7-day avg (gal/day)</th>

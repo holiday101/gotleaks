@@ -43,7 +43,7 @@ ENDSSH
 
 echo "-- Health check..."
 sleep 2
-CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 15 "$HEALTH_URL")
+CODE=$(curl -sSL -o /dev/null -w "%{http_code}" --max-time 15 "$HEALTH_URL")
 if [ "$CODE" = "200" ]; then
   echo "$HEALTH_URL responded HTTP $CODE"
 else
